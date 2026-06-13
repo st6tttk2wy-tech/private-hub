@@ -127,6 +127,15 @@ def files(filepath=None):
     
     if base_path.is_file():
         return send_file(base_path)
+
+
+@app.route("/download/<path:filepath>")
+@login_required
+def download(filepath):
+    file_path = FILES_DIR / filepath
+    if not file_path.exists() or not file_path.is_relative_to(FILES_DIR) or file_path.is_dir():
+        abort(404)
+    return send_file(file_path, as_attachment=True)
     
     items = []
     for item in sorted(base_path.iterdir()):
@@ -684,6 +693,11 @@ FILES_HTML = '''<!DOCTYPE html>
         }
         .upload-area:hover { border-color: #e94560; background: rgba(233,69,96,0.1); }
         .upload-area input { display: none; }
+        .download-btn {
+            padding: 8px 12px; background: rgba(233,69,96,0.2); border: 1px solid rgba(233,69,96,0.5);
+            border-radius: 8px; text-decoration: none; font-size: 14px; transition: all 0.2s;
+        }
+        .download-btn:hover { background: #e94560; }
     </style>
 </head>
 <body>
@@ -722,6 +736,9 @@ FILES_HTML = '''<!DOCTYPE html>
                     <a href="/files/{{ item.path }}">{{ item.name }}</a>
                 </div>
                 <div class="file-meta">{{ item.modified }}{% if not item.is_dir %} | {{ "%.1f"|format(item.size / 1024) }} KB{% endif %}</div>
+                {% if not item.is_dir %}
+                <a href="/download/{{ item.path }}" class="download-btn" title="下载">⬇️</a>
+                {% endif %}
             </div>
             {% endfor %}
             {% if not items %}
