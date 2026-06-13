@@ -331,7 +331,20 @@ def preview(filepath):
 @login_required
 def notes():
     notes_list = load_notes_index()
-    return render_template_string(NOTES_HTML, notes=notes_list)
+    query = request.args.get("q", "").strip()
+    if query:
+        filtered = []
+        for note in notes_list:
+            title_match = query.lower() in note.get("title", "").lower()
+            note_file = NOTES_DIR / f"{note['id']}.md"
+            content_match = False
+            if note_file.exists():
+                content = note_file.read_text(encoding="utf-8", errors="replace")
+                content_match = query.lower() in content.lower()
+            if title_match or content_match:
+                filtered.append(note)
+        notes_list = filtered
+    return render_template_string(NOTES_HTML, notes=notes_list, query=query)
 
 
 @app.route("/notes/<note_id>")
@@ -1073,7 +1086,14 @@ NOTES_HTML = '''<!DOCTYPE html>
         </div>
     </nav>
     <div class="container">
-        <button class="btn btn-primary" onclick="openModal()">+ 新建笔记</button>
+        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+            <form action="/notes" method="GET" style="display: flex; gap: 10px; flex: 1;">
+                <input type="text" name="q" value="{{ query }}" placeholder="搜索笔记..." style="flex: 1; padding: 12px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.1); color: #fff; font-size: 14px;">
+                <button type="submit" class="btn btn-primary">搜索</button>
+                {% if query %}<a href="/notes" class="btn btn-secondary" style="text-decoration:none;display:flex;align-items:center;">清除</a>{% endif %}
+            </form>
+            <button class="btn btn-primary" onclick="openModal()">+ 新建笔记</button>
+        </div>
         
         <div class="note-list">
             {% for note in notes %}
