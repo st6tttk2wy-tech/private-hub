@@ -983,29 +983,16 @@ def nav_html(active=""):
         ("/change-password", "密码管理", "password"),
         ("/logout", "退出", "logout"),
     ]
+    user = get_current_user()
     html = '<nav><div class="logo">Private Hub</div><div class="links">'
     for url, name, key in links:
+        if key == "users" and not (user and user.get("role") == "admin"):
+            continue
         cls = ' class="active"' if key == active else ''
         html += f'<a href="{url}"{cls}>{name}</a>'
     html += '</div></nav>'
     return html
 
-
-
-def get_nav(active=""):
-    user = get_current_user()
-    is_adm = user and user.get("role") == "admin"
-    perms = user.get("permissions", []) if user else []
-    html = '<nav><div class="logo">Private Hub</div><div class="links">'
-    for url, name, key, icon in NAV_ITEMS:
-        if key == "users" and not is_adm:
-            continue
-        if key not in ["home", "logout"] and key not in perms and not is_adm:
-            continue
-        cls = ' class="active"' if key == active else ""
-        html += f'<a href="{url}"{cls}>{icon} {name}</a>'
-    html += '</div></nav>'
-    return html
 
 
 def get_nav(active=""):
