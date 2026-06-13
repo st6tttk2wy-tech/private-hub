@@ -338,7 +338,7 @@ def change_password():
             add_log("修改密码", f"用户 {username} 修改了密码", user=username, reversible=True,
                    reverse_data={"username": username, "old_hash": old_hash})
             success = "密码修改成功"
-    return render_template_string(CHANGE_PWD_HTML, error=error, success=success)
+    return render_template_string(CHANGE_PWD_HTML, error=error, success=success, nav=get_nav("password"))
 
 
 # ============================================================================
@@ -350,7 +350,7 @@ def change_password():
 @admin_required
 def admin_users():
     users = load_users()
-    return render_template_string(ADMIN_USERS_HTML, users=users, current_user=session.get("username"))
+    return render_template_string(ADMIN_USERS_HTML, users=users, current_user=session.get("username"), nav=get_nav("users"))
 
 
 @app.route("/admin/users/add", methods=["POST"])
@@ -435,7 +435,7 @@ def admin_update_permissions(username):
 def logs_page():
     logs = load_ops_log()
     logs.reverse()
-    return render_template_string(LOGS_HTML, logs=logs)
+    return render_template_string(LOGS_HTML, logs=logs, nav=get_nav("logs"))
 
 
 @app.route("/api/logs/undo/<log_id>", methods=["POST"])
@@ -501,7 +501,7 @@ def undo_log(log_id):
 def news_page():
     news = load_news()
     settings = load_config_settings()
-    return render_template_string(NEWS_HTML, news=news, settings=settings, sources=NEWS_SOURCES)
+    return render_template_string(NEWS_HTML, news=news, settings=settings, sources=NEWS_SOURCES, nav=get_nav("news"))
 
 
 @app.route("/api/news/refresh", methods=["POST"])
@@ -533,14 +533,14 @@ def update_news_settings():
 @app.route("/")
 @login_required
 def home():
-    return render_template_string(HOME_HTML)
+    return render_template_string(HOME_HTML, nav=get_nav("home"))
 
 
 @app.route("/startpage")
 @login_required
 def startpage():
     bookmarks = load_bookmarks()
-    return render_template_string(STARTPAGE_HTML, bookmarks=bookmarks)
+    return render_template_string(STARTPAGE_HTML, bookmarks=bookmarks, nav=get_nav("startpage"))
 
 
 @app.route("/files")
@@ -564,7 +564,7 @@ def files(filepath=None):
             "size": item.stat().st_size if item.is_file() else 0,
             "modified": datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
         })
-    return render_template_string(FILES_HTML, items=items, current_path=filepath)
+    return render_template_string(FILES_HTML, items=items, current_path=filepath, nav=get_nav("files"))
 
 
 @app.route("/notes")
@@ -584,7 +584,7 @@ def notes():
             if title_match or content_match:
                 filtered.append(note)
         notes_list = filtered
-    return render_template_string(NOTES_HTML, notes=notes_list, query=query)
+    return render_template_string(NOTES_HTML, notes=notes_list, query=query, nav=get_nav("notes"))
 
 
 @app.route("/notes/<note_id>")
@@ -597,7 +597,7 @@ def note_detail(note_id):
     notes_index = load_notes_index()
     note = next((n for n in notes_index if n["id"] == note_id), {})
     title = note.get("title", "无标题")
-    return render_template_string(NOTE_DETAIL_HTML, content=content, note_id=note_id, title=title)
+    return render_template_string(NOTE_DETAIL_HTML, content=content, note_id=note_id, title=title, nav=get_nav("notes"))
 
 
 # ============================================================================
@@ -983,11 +983,49 @@ def nav_html(active=""):
         ("/change-password", "密码管理", "password"),
         ("/logout", "退出", "logout"),
     ]
-    user = get_current_user()
     html = '<nav><div class="logo">Private Hub</div><div class="links">'
     for url, name, key in links:
-        if key == "users" and not (user and user.get("role") == "admin"):
+        cls = ' class="active"' if key == active else ''
+        html += f'<a href="{url}"{cls}>{name}</a>'
+    html += '</div></nav>'
+    return html
+
+
+
+def get_nav(active=""):
+    user = get_current_user()
+    is_adm = user and user.get("role") == "admin"
+    perms = user.get("permissions", []) if user else []
+    html = '<nav><div class="logo">Private Hub</div><div class="links">'
+    for url, name, key, icon in NAV_ITEMS:
+        if key == "users" and not is_adm:
             continue
+        if key not in ["home", "logout"] and key not in perms and not is_adm:
+            continue
+        cls = ' class="active"' if key == active else ""
+        html += f'<a href="{url}"{cls}>{icon} {name}</a>'
+    html += '</div></nav>'
+    return html
+
+
+def get_nav(active=""):
+    user = get_current_user()
+    is_adm = user and user.get("role") == "admin"
+    links = [
+        ("/", "首页", "home"),
+        ("/news", "信息管理", "news"),
+        ("/data", "数据管理", "data"),
+        ("/files", "文件管理", "files"),
+        ("/notes", "笔记管理", "notes"),
+    ]
+    if is_adm:
+        links.append(("/admin/users", "用户管理", "users"))
+    links.extend([
+        ("/change-password", "密码管理", "password"),
+        ("/logout", "退出", "logout"),
+    ])
+    html = '<nav><div class="logo">Private Hub</div><div class="links">'
+    for url, name, key in links:
         cls = ' class="active"' if key == active else ''
         html += f'<a href="{url}"{cls}>{name}</a>'
     html += '</div></nav>'
@@ -1091,7 +1129,7 @@ HOME_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("home") + '''
+    {{ nav }}
     <div class="main-layout">
         <div class="sidebar">
             <div class="sidebar-title">快捷访问</div>
@@ -1188,7 +1226,7 @@ NEWS_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("news") + '''
+    {{ nav }}
     <div class="container">
         <div class="section-header">
             <div class="section-title">📰 今日热榜</div>
@@ -1293,7 +1331,7 @@ DATA_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("data") + '''
+    {{ nav }}
     <div class="container">
         <div class="card">
             <h2>数据操作</h2>
@@ -1351,7 +1389,7 @@ LOGS_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("") + '''
+    {{ nav }}
     <div class="container">
         <div class="section-title">📋 操作日志</div>
         <div class="log-list">
@@ -1436,7 +1474,7 @@ NOTES_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("notes") + '''
+    {{ nav }}
     <div class="container">
         <div style="display: flex; gap: 10px; margin-bottom: 20px;">
             <form action="/notes" method="GET" style="display: flex; gap: 10px; flex: 1;">
@@ -1580,7 +1618,7 @@ CHANGE_PWD_HTML = '''<!DOCTYPE html>
 .error{color:#ff6b6b;font-size:13px;margin-bottom:12px;}
 .success{color:#00b894;font-size:13px;margin-bottom:12px;}
 </style></head><body>
-''' + nav_html("password") + '''
+{{ nav }}
 <div class="container"><div class="card"><h2>修改密码</h2>
 {% if error %}<div class="error">{{ error }}</div>{% endif %}{% if success %}<div class="success">{{ success }}</div>{% endif %}
 <form method="POST">
@@ -1616,7 +1654,7 @@ th{color:rgba(255,255,255,0.4);font-size:12px;text-transform:uppercase;}
 .msg.error{background:rgba(233,69,96,0.15);color:#ff6b6b;}
 .msg.success{background:rgba(0,184,148,0.15);color:#00b894;}
 </style></head><body>
-''' + nav_html("users") + '''
+{{ nav }}
 <div class="container">
 <div class="card">
 <h2>添加用户</h2><div id="msg"></div>
@@ -1733,7 +1771,7 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
 .btn-row button{flex:1;padding:10px;border:none;border-radius:8px;cursor:pointer;font-size:13px;}
 .btn-primary{background:#e94560;color:#fff;}.btn-secondary{background:rgba(255,255,255,0.1);color:#fff;}
 </style></head><body>
-''' + nav_html("startpage") + '''
+{{ nav }}
 <div class="main">
 <div class="search-box"><input type="text" placeholder="搜索或输入网址..." onkeydown="if(event.key==='Enter'){var v=this.value;if(v.startsWith('http'))window.open(v);else window.open('https://www.google.com/search?q='+v)}"></div>
 <div id="bookmarksContainer"></div>
