@@ -9,6 +9,10 @@ import json
 import hashlib
 import secrets
 import platform
+import shutil
+import threading
+import time
+import requests
 from datetime import datetime
 from pathlib import Path
 from functools import wraps
@@ -36,13 +40,30 @@ DATA_DIR = PERSISTENT_DIR / "data"
 FILES_DIR = PERSISTENT_DIR / "files"
 NOTES_DIR = PERSISTENT_DIR / "notes"
 
-for d in [CONFIG_DIR, DATA_DIR, FILES_DIR, NOTES_DIR]:
+LOGS_DIR = PERSISTENT_DIR / "logs"
+NEWS_DIR = PERSISTENT_DIR / "news"
+
+for d in [CONFIG_DIR, DATA_DIR, FILES_DIR, NOTES_DIR, LOGS_DIR, NEWS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 CONFIG_FILE = CONFIG_DIR / "auth.json"
 USERS_FILE = CONFIG_DIR / "users.json"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
 NOTES_INDEX = DATA_DIR / "notes_index.json"
+OPS_LOG_FILE = LOGS_DIR / "operations.json"
+NEWS_FILE = NEWS_DIR / "daily_news.json"
+CONFIG_SETTINGS_FILE = CONFIG_DIR / "settings.json"
+
+
+
+NEWS_SOURCES = {
+    "weibo": {"name": "微博", "icon": "🔥", "api": "https://api.vvhan.com/api/hotlist/weibo"},
+    "douyin": {"name": "抖音", "icon": "🎵", "api": "https://api.vvhan.com/api/hotlist/douyin"},
+    "toutiao": {"name": "今日头条", "icon": "📰", "api": "https://api.vvhan.com/api/hotlist/toutiao"},
+    "zhihu": {"name": "知乎", "icon": "💡", "api": "https://api.vvhan.com/api/hotlist/zhihuHot"},
+    "bilibili": {"name": "B站", "icon": "📺", "api": "https://api.vvhan.com/api/hotlist/bili"},
+    "baidu": {"name": "百度", "icon": "🔍", "api": "https://api.vvhan.com/api/hotlist/baiduRD"},
+}
 
 WATERMARK_CSS = '''
 .watermark {
@@ -70,6 +91,92 @@ function createWatermark(text) {
 }
 createWatermark('Private Hub');
 '''
+
+
+
+def load_ops_log():
+    if OPS_LOG_FILE.exists():
+        try:
+            return json.loads(OPS_LOG_FILE.read_text(encoding="utf-8"))
+        except:
+            pass
+    return []
+
+def save_ops_log(logs):
+    OPS_LOG_FILE.write_text(json.dumps(logs, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def add_log(action, detail="", user=None, reversible=False, reverse_data=None):
+    logs = load_ops_log()
+    logs.append({
+        "id": secrets.token_hex(8),
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "user": user or session.get("username", "system"),
+        "action": action,
+        "detail": detail,
+        "reversible": reversible,
+        "reverse_data": reverse_data
+    })
+    if len(logs) > 500:
+        logs = logs[-500:]
+    save_ops_log(logs)
+
+def load_news():
+    if NEWS_FILE.exists():
+        try:
+            return json.loads(NEWS_FILE.read_text(encoding="utf-8"))
+        except:
+            pass
+    return {}
+
+def save_news(data):
+    NEWS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def load_config_settings():
+    if CONFIG_SETTINGS_FILE.exists():
+        try:
+            return json.loads(CONFIG_SETTINGS_FILE.read_text(encoding="utf-8"))
+        except:
+            pass
+    return {"auto_news": True, "news_hour": 8, "news_minute": 0}
+
+def save_config_settings(settings):
+    CONFIG_SETTINGS_FILE.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def fetch_news():
+    print("开始收集新闻...")
+    all_news = {}
+    for source_id, source in NEWS_SOURCES.items():
+        try:
+            resp = requests.get(source["api"], timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    items = data.get("data", [])[:20]
+                    all_news[source_id] = {
+                        "name": source["name"],
+                        "icon": source["icon"],
+                        "items": items,
+                        "updated": datetime.now().strftime("%Y-%m-%d %H:%M")
+                    }
+        except Exception as e:
+            print(f"  [{source['name']}] 失败: {e}")
+    if all_news:
+        save_news(all_news)
+    print("新闻收集完成")
+
+def news_scheduler():
+    while True:
+        now = datetime.now()
+        settings = load_config_settings()
+        if now.hour == settings.get("news_hour", 8) and now.minute == settings.get("news_minute", 0):
+            fetch_news()
+            time.sleep(61)
+        else:
+            time.sleep(30)
+
+# 启动新闻收集线程
+news_thread = threading.Thread(target=news_scheduler, daemon=True)
+news_thread.start()
 
 
 def hash_password(password):
@@ -116,6 +223,40 @@ def get_current_user():
 def is_admin():
     user = get_current_user()
     return user and user.get("role") == "admin"
+
+
+
+def get_nav(active=""):
+    user = get_current_user()
+    is_adm = user and user.get("role") == "admin"
+    links = [
+        ("/", "首页", "home"),
+        ("/news", "信息管理", "news"),
+        ("/data", "数据管理", "data"),
+        ("/files", "文件管理", "files"),
+        ("/notes", "笔记管理", "notes"),
+    ]
+    if is_adm:
+        links.append(("/admin/users", "用户管理", "users"))
+    links.extend([
+        ("/change-password", "密码管理", "password"),
+        ("/logout", "退出", "logout"),
+    ])
+    html = '<nav><div class="logo">Private Hub</div><div class="links">'
+    for url, name, key in links:
+        cls = ' class="active"' if key == active else ''
+        html += '<a href="' + url + '"' + cls + '>' + name + '</a>'
+    html += '</div></nav>'
+    return html
+
+def has_permission(perm):
+    user = get_current_user()
+    if not user:
+        return False
+    if user.get("role") == "admin":
+        return True
+    perms = user.get("permissions", [])
+    return "all" in perm or perm in perms
 
 
 def login_required(f):
@@ -184,7 +325,7 @@ def change_password():
             users[username]["password_hash"] = hash_password(new_password)
             save_users(users)
             success = "密码修改成功"
-    return render_template_string(CHANGE_PWD_HTML, error=error, success=success)
+    return render_template_string(CHANGE_PWD_HTML, error=error, success=success, nav=get_nav("password"))
 
 
 @app.route("/admin/users")
@@ -192,7 +333,7 @@ def change_password():
 @admin_required
 def admin_users():
     users = load_users()
-    return render_template_string(ADMIN_USERS_HTML, users=users, current_user=session.get("username"))
+    return render_template_string(ADMIN_USERS_HTML, users=users, current_user=session.get("username"), nav=get_nav("users"))
 
 
 @app.route("/admin/users/add", methods=["POST"])
@@ -257,11 +398,66 @@ def home():
     return render_template_string(DASHBOARD_HTML)
 
 
+
+@app.route("/news")
+@login_required
+def news_page():
+    news = load_news()
+    settings = load_config_settings()
+    return render_template_string(NEWS_HTML, news=news, settings=settings, sources=NEWS_SOURCES, nav=get_nav("news"), is_admin=is_admin)
+
+@app.route("/api/news/refresh", methods=["POST"])
+@login_required
+def refresh_news():
+    fetch_news()
+    return jsonify({"success": True})
+
+@app.route("/api/news/settings", methods=["POST"])
+@login_required
+def update_news_settings():
+    settings = load_config_settings()
+    settings["auto_news"] = request.json.get("auto_news", settings.get("auto_news", True))
+    settings["news_hour"] = int(request.json.get("news_hour", settings.get("news_hour", 8)))
+    settings["news_minute"] = int(request.json.get("news_minute", settings.get("news_minute", 0)))
+    save_config_settings(settings)
+    return jsonify({"success": True})
+
+@app.route("/logs")
+@login_required
+def logs_page():
+    logs = load_ops_log()
+    logs.reverse()
+    return render_template_string(LOGS_HTML, logs=logs, nav=get_nav("logs"))
+
+@app.route("/api/logs/undo/<log_id>", methods=["POST"])
+@login_required
+def undo_log(log_id):
+    logs = load_ops_log()
+    log_entry = None
+    for log in logs:
+        if log.get("id") == log_id:
+            log_entry = log
+            break
+    if not log_entry:
+        return jsonify({"error": "日志不存在"}), 404
+    if not log_entry.get("reversible"):
+        return jsonify({"error": "此操作不可撤销"}), 400
+    log_entry["undone"] = True
+    log_entry["undone_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    save_ops_log(logs)
+    return jsonify({"success": True})
+
+@app.route("/data")
+@login_required
+def data_module():
+    return render_template_string(DATA_HTML, nav=get_nav("data"))
+
+
 @app.route("/startpage")
 @login_required
 def startpage():
     bookmarks = load_bookmarks()
-    return render_template_string(STARTPAGE_HTML, bookmarks=bookmarks)
+    return render_template_string(STARTPAGE_HTML, bookmarks=bookmarks, nav=get_nav("startpage"))
 
 
 @app.route("/files")
@@ -288,7 +484,7 @@ def files(filepath=None):
             "modified": datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
         })
     
-    return render_template_string(FILES_HTML, items=items, current_path=filepath)
+    return render_template_string(FILES_HTML, items=items, current_path=filepath, nav=get_nav("files"))
 
 
 @app.route("/download/<path:filepath>")
@@ -425,7 +621,7 @@ def notes():
             if title_match or content_match:
                 filtered.append(note)
         notes_list = filtered
-    return render_template_string(NOTES_HTML, notes=notes_list, query=query)
+    return render_template_string(NOTES_HTML, notes=notes_list, query=query, nav=get_nav("notes"))
 
 
 @app.route("/notes/<note_id>")
@@ -438,7 +634,7 @@ def note_detail(note_id):
     notes_index = load_notes_index()
     note = next((n for n in notes_index if n["id"] == note_id), {})
     title = note.get("title", "无标题")
-    return render_template_string(NOTE_DETAIL_HTML, content=content, note_id=note_id, title=title)
+    return render_template_string(NOTE_DETAIL_HTML, content=content, note_id=note_id, title=title, nav=get_nav("notes"))
 
 
 @app.route("/api/bookmarks", methods=["GET", "POST"])
