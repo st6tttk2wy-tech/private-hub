@@ -201,7 +201,7 @@ def change_password():
             users[username]["password_hash"] = hash_password(new_password)
             save_users(users)
             success = "密码修改成功"
-    return render_template_string(CHANGE_PWD_HTML, error=error, success=success)
+    return render_template_string(CHANGE_PWD_HTML, error=error, success=success, nav=get_nav("password"))
 
 
 # ============================================================================
@@ -213,7 +213,7 @@ def change_password():
 @admin_required
 def admin_users():
     users = load_users()
-    return render_template_string(ADMIN_USERS_HTML, users=users, current_user=session.get("username"))
+    return render_template_string(ADMIN_USERS_HTML, users=users, current_user=session.get("username"), nav=get_nav("users"))
 
 
 @app.route("/admin/users/add", methods=["POST"])
@@ -273,14 +273,14 @@ def admin_reset_password(username):
 @app.route("/")
 @login_required
 def home():
-    return render_template_string(HOME_HTML)
+    return render_template_string(HOME_HTML, nav=get_nav("home"))
 
 
 @app.route("/startpage")
 @login_required
 def startpage():
     bookmarks = load_bookmarks()
-    return render_template_string(STARTPAGE_HTML, bookmarks=bookmarks)
+    return render_template_string(STARTPAGE_HTML, bookmarks=bookmarks, nav=get_nav("startpage"))
 
 
 @app.route("/files")
@@ -304,7 +304,7 @@ def files(filepath=None):
             "size": item.stat().st_size if item.is_file() else 0,
             "modified": datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
         })
-    return render_template_string(FILES_HTML, items=items, current_path=filepath)
+    return render_template_string(FILES_HTML, items=items, current_path=filepath, nav=get_nav("files"))
 
 
 @app.route("/notes")
@@ -324,7 +324,7 @@ def notes():
             if title_match or content_match:
                 filtered.append(note)
         notes_list = filtered
-    return render_template_string(NOTES_HTML, notes=notes_list, query=query)
+    return render_template_string(NOTES_HTML, notes=notes_list, query=query, nav=get_nav("notes"))
 
 
 @app.route("/notes/<note_id>")
@@ -337,7 +337,7 @@ def note_detail(note_id):
     notes_index = load_notes_index()
     note = next((n for n in notes_index if n["id"] == note_id), {})
     title = note.get("title", "无标题")
-    return render_template_string(NOTE_DETAIL_HTML, content=content, note_id=note_id, title=title)
+    return render_template_string(NOTE_DETAIL_HTML, content=content, note_id=note_id, title=title, nav=get_nav(""))
 
 
 # ============================================================================
@@ -669,8 +669,6 @@ for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Privat
 
 
 def nav_html(active=""):
-    user = get_current_user()
-    is_adm = user and user.get("role") == "admin"
     links = [
         ("/", "首页", "home"),
         ("/startpage", "启动页", "startpage"),
@@ -682,7 +680,7 @@ def nav_html(active=""):
     ]
     html = '<nav><div class="logo">Private Hub</div><div class="links">'
     for url, name, key in links:
-        if key == "users" and not is_adm:
+        if key == "users" and not is_admin():
             continue
         cls = ' class="active"' if key == active else ''
         html += f'<a href="{url}"{cls}>{name}</a>'
@@ -796,7 +794,7 @@ HOME_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("home") + '''
+    {{ nav }}
     <div class="container">
         <div class="header">
             <div id="time"></div>
@@ -966,7 +964,7 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("startpage") + '''
+    {{ nav }}
     <div class="main">
         <div class="search-box">
             <input type="text" id="searchInput" placeholder="搜索或输入网址..." onkeydown="if(event.key==='Enter'){var v=this.value;if(v.startsWith('http'))window.open(v);else window.open('https://www.google.com/search?q='+v)}">
@@ -1075,7 +1073,7 @@ FILES_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("files") + '''
+    {{ nav }}
     <div class="container">
         <div class="breadcrumb"><a href="/files">根目录</a>{% if current_path %} / {{ current_path }}{% endif %}</div>
         <div class="upload-area" onclick="document.getElementById('fileInput').click()">
@@ -1222,7 +1220,7 @@ NOTES_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("notes") + '''
+    {{ nav }}
     <div class="container">
         <div class="toolbar">
             <form action="/notes" method="GET" style="display:flex;gap:10px;flex:1">
@@ -1366,7 +1364,7 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("") + '''
+    {{ nav }}
     <div class="container">
         <div class="note-header">
             <div class="note-title">{{ title }}</div>
@@ -1490,7 +1488,7 @@ CHANGE_PWD_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("password") + '''
+    {{ nav }}
     <div class="container">
         <div class="card">
             <h2>修改密码</h2>
@@ -1548,7 +1546,7 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    ''' + nav_html("users") + '''
+    {{ nav }}
     <div class="container">
         <div class="card">
             <h2>添加用户</h2>
