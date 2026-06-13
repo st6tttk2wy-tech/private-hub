@@ -2069,6 +2069,167 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
 </html>'''
 
 
+NEWS_HTML = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>信息管理 - Private Hub</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
+        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+        nav .logo { font-size: 18px; font-weight: bold; color: #fff; }
+        nav .links { display: flex; gap: 4px; align-items: center; }
+        nav .links a { color: rgba(255,255,255,0.6); text-decoration: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; transition: all 0.2s; }
+        nav .links a:hover { color: #fff; background: rgba(255,255,255,0.1); }
+        nav .links a.active { color: #e94560; background: rgba(233,69,96,0.1); }
+        .container { max-width: 1200px; margin: 0 auto; padding: 30px; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+        .tab { padding: 10px 20px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; cursor: pointer; font-size: 14px; transition: all 0.2s; color: rgba(255,255,255,0.7); }
+        .tab:hover { background: rgba(233,69,96,0.15); color: #fff; }
+        .tab.active { background: rgba(233,69,96,0.2); border-color: #e94560; color: #fff; }
+        .news-panel { display: none; }
+        .news-panel.active { display: block; }
+        .news-list { background: rgba(255,255,255,0.03); border-radius: 12px; overflow: hidden; }
+        .news-item { display: flex; align-items: center; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s; }
+        .news-item:hover { background: rgba(255,255,255,0.05); }
+        .news-rank { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; margin-right: 15px; flex-shrink: 0; }
+        .news-rank.top3 { background: #e94560; color: #fff; }
+        .news-rank.normal { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
+        .news-title { flex: 1; font-size: 14px; color: rgba(255,255,255,0.8); }
+        .news-title a { color: inherit; text-decoration: none; }
+        .news-title a:hover { color: #e94560; }
+        .news-hot { color: #e94560; font-size: 12px; margin-left: 10px; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .section-title { font-size: 18px; color: rgba(255,255,255,0.9); }
+        .update-time { font-size: 12px; color: rgba(255,255,255,0.4); }
+        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
+        .btn-primary { background: #e94560; color: #fff; }
+        .empty { text-align: center; padding: 40px; color: rgba(255,255,255,0.3); }
+    </style>
+</head>
+<body>
+    {{ nav|safe }}
+    <div class="container">
+        <div class="section-header">
+            <div class="section-title">今日热榜</div>
+            <button class="btn btn-primary" onclick="refreshNews()">刷新数据</button>
+        </div>
+        <div class="tabs">
+            {% for source_id, source in sources.items() %}
+            <div class="tab" onclick="showTab('{{ source_id }}')">{{ source.icon }} {{ source.name }}</div>
+            {% endfor %}
+        </div>
+        {% for source_id, source in sources.items() %}
+        <div class="news-panel" id="panel-{{ source_id }}">
+            {% if source_id in news %}
+            <div class="update-time">更新时间: {{ news[source_id].updated }}</div>
+            <div class="news-list">
+                {% for item in news[source_id].items %}
+                <div class="news-item">
+                    <div class="news-rank {{ 'top3' if loop.index <= 3 else 'normal' }}">{{ loop.index }}</div>
+                    <div class="news-title"><a href="{{ item.url }}" target="_blank">{{ item.title }}</a></div>
+                    {% if item.hot %}<div class="news-hot">{{ item.hot }}</div>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty">暂无数据，请点击刷新</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    <script>
+        function showTab(id) {
+            document.querySelectorAll('.news-panel').forEach(function(p) { p.classList.remove('active'); });
+            document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+            document.getElementById('panel-' + id).classList.add('active');
+            event.target.classList.add('active');
+        }
+        async function refreshNews() {
+            var r = await fetch('/api/news/refresh', {method: 'POST'});
+            if (r.ok) { location.reload(); } else { alert('刷新失败'); }
+        }
+        document.querySelector('.tab').click();
+    </script>
+</body>
+</html>'''
+
+
+LOGS_HTML = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>操作日志 - Private Hub</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
+        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+        nav .logo { font-size: 18px; font-weight: bold; color: #fff; }
+        nav .links { display: flex; gap: 4px; align-items: center; }
+        nav .links a { color: rgba(255,255,255,0.6); text-decoration: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; transition: all 0.2s; }
+        nav .links a:hover { color: #fff; background: rgba(255,255,255,0.1); }
+        nav .links a.active { color: #e94560; background: rgba(233,69,96,0.1); }
+        .container { max-width: 900px; margin: 0 auto; padding: 30px; }
+        .log-list { background: rgba(255,255,255,0.03); border-radius: 12px; overflow: hidden; }
+        .log-item { display: flex; align-items: center; padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s; }
+        .log-item:hover { background: rgba(255,255,255,0.05); }
+        .log-item.undone { opacity: 0.4; }
+        .log-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; margin-right: 15px; flex-shrink: 0; background: rgba(255,255,255,0.1); }
+        .log-info { flex: 1; }
+        .log-action { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+        .log-detail { font-size: 12px; color: rgba(255,255,255,0.5); }
+        .log-meta { text-align: right; font-size: 12px; color: rgba(255,255,255,0.4); }
+        .undo-btn { padding: 5px 12px; background: rgba(253,203,110,0.2); border: 1px solid rgba(253,203,110,0.5); border-radius: 6px; color: #fdcb6e; cursor: pointer; font-size: 12px; transition: all 0.2s; margin-left: 10px; }
+        .undo-btn:hover { background: #fdcb6e; color: #000; }
+        .undone-badge { padding: 3px 8px; background: rgba(255,107,107,0.2); border-radius: 4px; color: #ff6b6b; font-size: 11px; margin-left: 8px; }
+        .section-title { font-size: 18px; margin-bottom: 20px; }
+        .empty { text-align: center; padding: 60px; color: rgba(255,255,255,0.3); }
+    </style>
+</head>
+<body>
+    {{ nav|safe }}
+    <div class="container">
+        <div class="section-title">操作日志</div>
+        <div class="log-list">
+            {% for log in logs %}
+            <div class="log-item {{ 'undone' if log.undone else '' }}">
+                <div class="log-icon">📋</div>
+                <div class="log-info">
+                    <div class="log-action">{{ log.action }}</div>
+                    <div class="log-detail">{{ log.detail }}</div>
+                </div>
+                <div class="log-meta">
+                    <div>{{ log.user }}</div>
+                    <div>{{ log.time }}</div>
+                </div>
+                {% if log.reversible and not log.undone %}
+                <button class="undo-btn" onclick="undoLog('{{ log.id }}')">撤销</button>
+                {% endif %}
+                {% if log.undone %}
+                <span class="undone-badge">已撤销</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% if not logs %}
+            <div class="empty">暂无操作日志</div>
+            {% endif %}
+        </div>
+    </div>
+    <script>
+        async function undoLog(id) {
+            if (!confirm('确定撤销此操作？')) return;
+            var r = await fetch('/api/logs/undo/' + id, {method: 'POST'});
+            var d = await r.json();
+            if (d.success) { location.reload(); } else { alert(d.error || '撤销失败'); }
+        }
+    </script>
+</body>
+</html>'''
+
+
 DATA_HTML = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
