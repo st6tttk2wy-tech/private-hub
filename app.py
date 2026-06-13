@@ -774,112 +774,108 @@ HOME_HTML = '''<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>首页 - Private Hub</title>
+    <title>私密中心</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { min-height: 100vh; background: #0f0f1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
         ''' + NAV_CSS + '''
-        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-        .header { text-align: center; margin-bottom: 30px; }
-        #time { font-size: 48px; font-weight: 300; margin: 10px 0; }
-        #date { color: rgba(255,255,255,0.4); font-size: 14px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 30px; }
+        #time { font-size: 48px; font-weight: 300; text-align: center; margin: 20px 0; }
+        #date { text-align: center; color: rgba(255,255,255,0.5); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .card {
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px; padding: 20px; transition: all 0.2s;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px; padding: 25px; transition: transform 0.2s, border-color 0.2s;
         }
-        .card:hover { border-color: rgba(233,69,96,0.3); transform: translateY(-2px); }
-        .card-title { color: rgba(255,255,255,0.5); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
-        .card-value { font-size: 28px; font-weight: 600; }
-        .card-sub { color: rgba(255,255,255,0.4); font-size: 12px; margin-top: 4px; }
-        .progress-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 12px; overflow: hidden; }
-        .progress-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
-        .green { background: linear-gradient(90deg, #00b894, #55efc4); }
-        .yellow { background: linear-gradient(90deg, #fdcb6e, #f39c12); }
-        .red { background: linear-gradient(90deg, #e94560, #ff6b6b); }
-        .chart-card { grid-column: span 2; }
-        .quick-section { margin-top: 24px; }
-        .section-title { font-size: 14px; color: rgba(255,255,255,0.5); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 1px; }
-        .quick-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+        .card:hover { transform: translateY(-3px); border-color: rgba(233,69,96,0.5); }
+        .card h3 { color: #e94560; margin-bottom: 15px; font-size: 16px; }
+        .stat { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .stat:last-child { border: none; }
+        .stat .label { color: rgba(255,255,255,0.6); }
+        .stat .value { font-weight: bold; }
+        .progress-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; margin-top: 8px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+        .progress-fill.green { background: linear-gradient(90deg, #00b894, #55efc4); }
+        .progress-fill.yellow { background: linear-gradient(90deg, #fdcb6e, #f39c12); }
+        .progress-fill.red { background: linear-gradient(90deg, #e94560, #ff6b6b); }
+        .quick-links { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
         .quick-link {
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 12px; padding: 16px; text-align: center; text-decoration: none; color: #fff;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px; padding: 20px; text-align: center; text-decoration: none; color: #fff;
             transition: all 0.2s;
         }
-        .quick-link:hover { background: rgba(233,69,96,0.15); border-color: rgba(233,69,96,0.3); transform: translateY(-2px); }
-        .quick-link .icon { font-size: 24px; margin-bottom: 8px; display: block; }
-        .quick-link .name { font-size: 12px; color: rgba(255,255,255,0.6); }
+        .quick-link:hover { background: rgba(233,69,96,0.2); border-color: #e94560; }
+        .quick-link .icon { font-size: 32px; margin-bottom: 10px; }
+        .quick-link .name { font-size: 14px; color: rgba(255,255,255,0.8); }
+        .section-title { font-size: 18px; margin-bottom: 20px; color: rgba(255,255,255,0.9); }
+        .chart-card { grid-column: span 2; }
+        .data-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+        .data-card {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px; padding: 20px; text-align: center;
+        }
+        .data-card .icon { font-size: 28px; margin-bottom: 8px; }
+        .data-card .count { font-size: 24px; font-weight: bold; color: #e94560; }
+        .data-card .label { font-size: 12px; color: rgba(255,255,255,0.5); }
         ''' + RESPONSIVE_CSS + '''
-        @media (max-width: 768px) { .chart-card { grid-column: span 1; } }
+        @media (max-width: 768px) { .quick-links { grid-template-columns: repeat(2, 1fr); } .data-cards { grid-template-columns: 1fr; } .chart-card { grid-column: span 1; } }
         ''' + WATERMARK_CSS + '''
     </style>
 </head>
 <body>
     {{ nav }}
     <div class="container">
-        <div class="header">
-            <div id="time"></div>
-            <div id="date"></div>
+        <div id="time"></div>
+        <div id="date"></div>
+        
+        <div class="data-cards" style="margin-top: 30px;">
+            <div class="data-card"><div class="icon">🔗</div><div class="count" id="bm-val">--</div><div class="label">书签</div></div>
+            <div class="data-card"><div class="icon">📝</div><div class="count" id="note-val">--</div><div class="label">笔记</div></div>
+            <div class="data-card"><div class="icon">📁</div><div class="count" id="file-val">--</div><div class="label">文件</div></div>
         </div>
+        
         <div class="grid">
             <div class="card">
-                <div class="card-title">CPU</div>
-                <div class="card-value" id="cpu-val">--</div>
-                <div class="progress-bar"><div class="progress-fill green" id="cpu-bar"></div></div>
+                <h3>💻 CPU</h3>
+                <div id="cpu-info"><div class="stat"><span class="label">使用率</span><span class="value" id="cpu-val">--</span></div><div class="progress-bar"><div class="progress-fill green" id="cpu-bar"></div></div></div>
             </div>
             <div class="card">
-                <div class="card-title">内存</div>
-                <div class="card-value" id="mem-val">--</div>
-                <div class="progress-bar"><div class="progress-fill green" id="mem-bar"></div></div>
+                <h3>🧠 内存</h3>
+                <div id="mem-info"><div class="stat"><span class="label">已用</span><span class="value" id="mem-val">--</span></div><div class="progress-bar"><div class="progress-fill green" id="mem-bar"></div></div></div>
             </div>
             <div class="card">
-                <div class="card-title">磁盘</div>
-                <div class="card-value" id="disk-val">--</div>
-                <div class="progress-bar"><div class="progress-fill green" id="disk-bar"></div></div>
+                <h3>💾 磁盘</h3>
+                <div id="disk-info"><div class="stat"><span class="label">已用</span><span class="value" id="disk-val">--</span></div><div class="progress-bar"><div class="progress-fill green" id="disk-bar"></div></div></div>
             </div>
             <div class="card">
-                <div class="card-title">运行时间</div>
-                <div class="card-value" id="uptime-val" style="font-size:20px">--</div>
-            </div>
-            <div class="card">
-                <div class="card-title">书签</div>
-                <div class="card-value" id="bm-val">--</div>
-            </div>
-            <div class="card">
-                <div class="card-title">笔记</div>
-                <div class="card-value" id="note-val">--</div>
-            </div>
-            <div class="card">
-                <div class="card-title">文件</div>
-                <div class="card-value" id="file-val">--</div>
+                <h3>ℹ️ 系统</h3>
+                <div id="sys-info"><div class="stat"><span class="label">运行</span><span class="value" id="uptime-val">--</span></div></div>
             </div>
             <div class="card chart-card">
-                <div class="card-title">系统监控</div>
-                <canvas id="usageChart" height="150"></canvas>
+                <h3>📊 系统监控</h3>
+                <canvas id="usageChart" height="120"></canvas>
             </div>
         </div>
-        <div class="quick-section">
-            <div class="section-title">快捷访问</div>
-            <div class="quick-links">
-                <a href="/startpage" class="quick-link"><span class="icon">🚀</span><span class="name">启动页</span></a>
-                <a href="/files" class="quick-link"><span class="icon">📁</span><span class="name">文件</span></a>
-                <a href="/notes" class="quick-link"><span class="icon">📝</span><span class="name">笔记</span></a>
-                <a href="/change-password" class="quick-link"><span class="icon">🔑</span><span class="name">密码</span></a>
-                <a href="/admin/users" class="quick-link"><span class="icon">👥</span><span class="name">用户</span></a>
-                <a href="#" class="quick-link" onclick="exportData()"><span class="icon">📥</span><span class="name">导出</span></a>
-            </div>
+        
+        <h2 class="section-title">快捷访问</h2>
+        <div class="quick-links">
+            <a href="/startpage" class="quick-link"><div class="icon">🚀</div><div class="name">启动页</div></a>
+            <a href="/files" class="quick-link"><div class="icon">📁</div><div class="name">文件管理</div></a>
+            <a href="/notes" class="quick-link"><div class="icon">📝</div><div class="name">笔记</div></a>
+            <a href="/change-password" class="quick-link"><div class="icon">🔑</div><div class="name">修改密码</div></a>
+            <a href="/admin/users" class="quick-link"><div class="icon">👥</div><div class="name">用户管理</div></a>
+            <a href="#" class="quick-link" onclick="exportData()"><div class="icon">📥</div><div class="name">导出数据</div></a>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
         function updateTime() {
             var now = new Date();
-            document.getElementById('time').textContent = now.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
-            document.getElementById('date').textContent = now.toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric', weekday:'long'});
+            document.getElementById('time').textContent = now.toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'});
+            document.getElementById('date').textContent = now.toLocaleDateString('zh-CN', {year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'});
         }
         updateTime(); setInterval(updateTime, 1000);
-        function getColor(p) { return p > 80 ? 'red' : p > 60 ? 'yellow' : 'green'; }
-        function setBar(id, pct) { var el = document.getElementById(id); el.style.width = pct + '%'; el.className = 'progress-fill ' + getColor(pct); }
+        function getProgressClass(p) { return p > 80 ? 'red' : p > 60 ? 'yellow' : 'green'; }
         var cpuH=[], memH=[], diskH=[], labels=[];
         var ctx = document.getElementById('usageChart');
         var chart = new Chart(ctx, {
@@ -898,10 +894,12 @@ HOME_HTML = '''<!DOCTYPE html>
             try {
                 var r = await fetch('/api/system'); var d = await r.json();
                 document.getElementById('cpu-val').textContent = d.cpu_percent + '%';
-                document.getElementById('mem-val').textContent = d.memory_percent + '%';
-                document.getElementById('disk-val').textContent = d.disk_percent + '%';
+                document.getElementById('mem-val').textContent = d.memory_used_gb + 'GB / ' + d.memory_total_gb + 'GB';
+                document.getElementById('disk-val').textContent = d.disk_used_gb + 'GB / ' + d.disk_total_gb + 'GB';
                 document.getElementById('uptime-val').textContent = d.uptime;
-                setBar('cpu-bar', d.cpu_percent); setBar('mem-bar', d.memory_percent); setBar('disk-bar', d.disk_percent);
+                var cpuBar = document.getElementById('cpu-bar'); cpuBar.style.width = d.cpu_percent + '%'; cpuBar.className = 'progress-fill ' + getProgressClass(d.cpu_percent);
+                var memBar = document.getElementById('mem-bar'); memBar.style.width = d.memory_percent + '%'; memBar.className = 'progress-fill ' + getProgressClass(d.memory_percent);
+                var diskBar = document.getElementById('disk-bar'); diskBar.style.width = d.disk_percent + '%'; diskBar.className = 'progress-fill ' + getProgressClass(d.disk_percent);
                 var t = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
                 labels.push(t); cpuH.push(d.cpu_percent); memH.push(d.memory_percent); diskH.push(d.disk_percent);
                 if (labels.length > 30) { labels.shift(); cpuH.shift(); memH.shift(); diskH.shift(); }
@@ -918,7 +916,7 @@ HOME_HTML = '''<!DOCTYPE html>
         }
         function exportData() { window.open('/api/data/export', '_blank'); }
         loadSystem(); loadStats();
-        setInterval(loadSystem, 3000); setInterval(loadStats, 30000);
+        setInterval(loadSystem, 5000); setInterval(loadStats, 30000);
     </script>
     <script>''' + WATERMARK_JS + '''</script>
 </body>
