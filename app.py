@@ -8,6 +8,7 @@ import sys
 import json
 import hashlib
 import secrets
+import platform
 from datetime import datetime
 from pathlib import Path
 from functools import wraps
