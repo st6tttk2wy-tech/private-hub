@@ -76,42 +76,33 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 
+DEFAULT_USERS = {
+    "001": {
+        "password_hash": hash_password("123456"),
+        "role": "admin",
+        "created_at": "2026-01-01 00:00"
+    }
+}
+
+
 def load_users():
     if USERS_FILE.exists():
-        return json.loads(USERS_FILE.read_text(encoding="utf-8"))
-    return {}
+        try:
+            users = json.loads(USERS_FILE.read_text(encoding="utf-8"))
+            # 确保默认管理员账号存在
+            if "001" not in users:
+                users["001"] = DEFAULT_USERS["001"].copy()
+                save_users(users)
+            if users:
+                return users
+        except:
+            pass
+    save_users(DEFAULT_USERS)
+    return DEFAULT_USERS.copy()
 
 
 def save_users(users):
     USERS_FILE.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def init_admin():
-    users = load_users()
-    admin_user = os.environ.get("ADMIN_USER", "001")
-    admin_pass = os.environ.get("ADMIN_PASS", "123456")
-    
-    # 创建新管理员账号（如果不存在）
-    if admin_user not in users:
-        users[admin_user] = {
-            "password_hash": hash_password(admin_pass),
-            "role": "admin",
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
-        }
-        save_users(users)
-        print(f"\n{'='*50}")
-        print(f"已创建管理员账号: {admin_user}")
-        print(f"管理员密码: {admin_pass}")
-        print(f"{'='*50}\n")
-    
-    # 确保旧账号也能登录
-    if "admin" not in users:
-        users["admin"] = {
-            "password_hash": hash_password(admin_pass),
-            "role": "admin",
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
-        }
-        save_users(users)
 
 
 def get_current_user():
@@ -1355,5 +1346,4 @@ DATA_HTML = '''<!DOCTYPE html>
 
 if __name__ == "__main__":
     port = int(os.environ.get("HUB_PORT", os.environ.get("PORT", 8888)))
-    init_admin()
     app.run(host="0.0.0.0", port=port, debug=False)
