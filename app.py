@@ -40,6 +40,7 @@ for d in [CONFIG_DIR, DATA_DIR, FILES_DIR, NOTES_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 CONFIG_FILE = CONFIG_DIR / "auth.json"
+USERS_FILE = CONFIG_DIR / "users.json"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
 NOTES_INDEX = DATA_DIR / "notes_index.json"
 
@@ -71,32 +72,52 @@ createWatermark('Private Hub');
 '''
 
 
-def load_config():
-    if CONFIG_FILE.exists():
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    
-    env_password = os.environ.get("HUB_PASSWORD")
-    if env_password:
-        config = {"password_hash": hash_password(env_password), "username": "admin"}
-    else:
-        password = secrets.token_urlsafe(8)
-        config = {"password_hash": hash_password(password), "username": "admin"}
-        print(f"\n{'='*50}")
-        print(f"首次启动 - 自动生成密码: {password}")
-        print(f"请妥善保存，下次登录需要使用此密码")
-        print(f"{'='*50}\n")
-    
-    CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
-    return config
-
-
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 
-def check_password(password):
-    config = load_config()
-    return hash_password(password) == config.get("password_hash", "")
+def load_users():
+    if USERS_FILE.exists():
+        return json.loads(USERS_FILE.read_text(encoding="utf-8"))
+    return {}
+
+
+def save_users(users):
+    USERS_FILE.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def init_admin():
+    users = load_users()
+    if "admin" in users:
+        return
+    env_password = os.environ.get("HUB_PASSWORD")
+    if env_password:
+        password = env_password
+    else:
+        password = secrets.token_urlsafe(8)
+        print(f"\n{'='*50}")
+        print(f"首次启动 - 管理员密码: {password}")
+        print(f"请妥善保存，下次登录需要使用此密码")
+        print(f"{'='*50}\n")
+    users["admin"] = {
+        "password_hash": hash_password(password),
+        "role": "admin",
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    save_users(users)
+
+
+def get_current_user():
+    username = session.get("username")
+    if not username:
+        return None
+    users = load_users()
+    return users.get(username)
+
+
+def is_admin():
+    user = get_current_user()
+    return user and user.get("role") == "admin"
 
 
 def login_required(f):
@@ -104,6 +125,15 @@ def login_required(f):
     def decorated(*args, **kwargs):
         if not session.get("logged_in"):
             return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not is_admin():
+            abort(403)
         return f(*args, **kwargs)
     return decorated
 
@@ -116,11 +146,15 @@ def login_required(f):
 def login():
     error = None
     if request.method == "POST":
+        username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if check_password(password):
+        users = load_users()
+        user = users.get(username)
+        if user and hash_password(password) == user.get("password_hash", ""):
             session["logged_in"] = True
+            session["username"] = username
             return redirect(url_for("dashboard"))
-        error = "密码错误"
+        error = "用户名或密码错误"
     return render_template_string(LOGIN_HTML, error=error)
 
 
@@ -130,9 +164,99 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.route("/change-password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    error = None
+    success = None
+    if request.method == "POST":
+        old_password = request.form.get("old_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        username = session.get("username")
+        users = load_users()
+        user = users.get(username)
+        if not user or hash_password(old_password) != user.get("password_hash", ""):
+            error = "原密码错误"
+        elif new_password != confirm_password:
+            error = "两次输入的新密码不一致"
+        elif len(new_password) < 4:
+            error = "密码长度不能少于4位"
+        else:
+            users[username]["password_hash"] = hash_password(new_password)
+            save_users(users)
+            success = "密码修改成功"
+    return render_template_string(CHANGE_PWD_HTML, error=error, success=success)
+
+
+@app.route("/admin/users")
+@login_required
+@admin_required
+def admin_users():
+    users = load_users()
+    return render_template_string(ADMIN_USERS_HTML, users=users, current_user=session.get("username"))
+
+
+@app.route("/admin/users/add", methods=["POST"])
+@login_required
+@admin_required
+def admin_add_user():
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    role = request.form.get("role", "user")
+    users = load_users()
+    if not username or not password:
+        return jsonify({"error": "用户名和密码不能为空"}), 400
+    if username in users:
+        return jsonify({"error": "用户名已存在"}), 400
+    if role not in ["admin", "user"]:
+        return jsonify({"error": "无效的角色"}), 400
+    users[username] = {
+        "password_hash": hash_password(password),
+        "role": role,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    save_users(users)
+    return jsonify({"success": True})
+
+
+@app.route("/admin/users/<username>", methods=["DELETE"])
+@login_required
+@admin_required
+def admin_delete_user(username):
+    if username == "admin":
+        return jsonify({"error": "不能删除管理员账号"}), 400
+    users = load_users()
+    if username in users:
+        del users[username]
+        save_users(users)
+    return jsonify({"success": True})
+
+
+@app.route("/admin/users/<username>/reset-password", methods=["POST"])
+@login_required
+@admin_required
+def admin_reset_password(username):
+    users = load_users()
+    if username not in users:
+        return jsonify({"error": "用户不存在"}), 404
+    new_password = secrets.token_urlsafe(8)
+    users[username]["password_hash"] = hash_password(new_password)
+    save_users(users)
+    return jsonify({"success": True, "password": new_password})
+
+
+@app.route("/data")
+@login_required
+def data_module():
+    return render_template_string(DATA_HTML)
+
+
 @app.route("/")
 @login_required
 def dashboard():
+    if not is_admin():
+        return redirect(url_for("data_module"))
     return render_template_string(DASHBOARD_HTML)
 
 
@@ -372,8 +496,12 @@ LOGIN_HTML = '''<!DOCTYPE html>
         {% if error %}<div class="error">{{ error }}</div>{% endif %}
         <form method="POST">
             <div class="input-group">
+                <label>用户名</label>
+                <input type="text" name="username" placeholder="请输入用户名" autofocus>
+            </div>
+            <div class="input-group">
                 <label>密码</label>
-                <input type="password" name="password" placeholder="请输入密码" autofocus>
+                <input type="password" name="password" placeholder="请输入密码">
             </div>
             <button type="submit" class="btn">登录</button>
         </form>
@@ -446,6 +574,8 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
+            <a href="/admin/users">用户管理</a>
+            <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
         </div>
     </nav>
@@ -619,6 +749,7 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
+            <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
         </div>
     </nav>
@@ -756,6 +887,7 @@ FILES_HTML = '''<!DOCTYPE html>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
+            <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
         </div>
     </nav>
@@ -873,6 +1005,7 @@ NOTES_HTML = '''<!DOCTYPE html>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
+            <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
         </div>
     </nav>
@@ -968,11 +1101,237 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
         <div class="links">
             <a href="/notes">返回列表</a>
             <a href="/">仪表盘</a>
+            <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="container">
         <div class="content">{{ content }}</div>
+    </div>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
+</body>
+</html>'''
+
+
+CHANGE_PWD_HTML = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>修改密码 - 私密中心</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
+        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        nav .logo { font-size: 20px; font-weight: bold; }
+        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
+        nav .links a:hover { color: #e94560; }
+        .container { max-width: 500px; margin: 50px auto; padding: 30px; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 30px; }
+        .card h2 { margin-bottom: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; color: rgba(255,255,255,0.7); }
+        .form-group input { width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.1); color: #fff; font-size: 14px; }
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; background: #e94560; color: #fff; font-size: 16px; cursor: pointer; }
+        .btn:hover { background: #c23152; }
+        .error { color: #ff6b6b; margin-bottom: 15px; font-size: 14px; }
+        .success { color: #00b894; margin-bottom: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="logo">🔑 修改密码</div>
+        <div class="links">
+            <a href="/">返回</a>
+            <a href="/logout">退出</a>
+        </div>
+    </nav>
+    <div class="container">
+        <div class="card">
+            <h2>修改密码</h2>
+            {% if error %}<div class="error">{{ error }}</div>{% endif %}
+            {% if success %}<div class="success">{{ success }}</div>{% endif %}
+            <form method="POST">
+                <div class="form-group">
+                    <label>原密码</label>
+                    <input type="password" name="old_password" required>
+                </div>
+                <div class="form-group">
+                    <label>新密码</label>
+                    <input type="password" name="new_password" required>
+                </div>
+                <div class="form-group">
+                    <label>确认新密码</label>
+                    <input type="password" name="confirm_password" required>
+                </div>
+                <button type="submit" class="btn">确认修改</button>
+            </form>
+        </div>
+    </div>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
+</body>
+</html>'''
+
+
+ADMIN_USERS_HTML = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理 - 私密中心</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
+        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        nav .logo { font-size: 20px; font-weight: bold; }
+        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
+        nav .links a:hover { color: #e94560; }
+        .container { max-width: 800px; margin: 30px auto; padding: 30px; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 30px; margin-bottom: 20px; }
+        .card h2 { margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        th { color: rgba(255,255,255,0.6); font-size: 14px; }
+        .role-admin { color: #e94560; }
+        .role-user { color: #00b894; }
+        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin-right: 5px; }
+        .btn-danger { background: #e94560; color: #fff; }
+        .btn-warning { background: #fdcb6e; color: #000; }
+        .btn-primary { background: #0984e3; color: #fff; }
+        .form-row { display: flex; gap: 10px; margin-bottom: 15px; }
+        .form-row input, .form-row select { flex: 1; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; background: rgba(255,255,255,0.1); color: #fff; }
+        .msg { padding: 10px; border-radius: 6px; margin-bottom: 15px; display: none; }
+        .msg.error { background: rgba(233,69,96,0.2); color: #ff6b6b; display: block; }
+        .msg.success { background: rgba(0,184,148,0.2); color: #00b894; display: block; }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="logo">👥 用户管理</div>
+        <div class="links">
+            <a href="/">仪表盘</a>
+            <a href="/change-password">修改密码</a>
+            <a href="/logout">退出</a>
+        </div>
+    </nav>
+    <div class="container">
+        <div class="card">
+            <h2>添加用户</h2>
+            <div id="msg" class="msg"></div>
+            <div class="form-row">
+                <input type="text" id="newUsername" placeholder="用户名">
+                <input type="password" id="newPassword" placeholder="密码">
+                <select id="newRole">
+                    <option value="user">普通用户</option>
+                    <option value="admin">管理员</option>
+                </select>
+                <button class="btn btn-primary" onclick="addUser()">添加</button>
+            </div>
+        </div>
+        <div class="card">
+            <h2>用户列表</h2>
+            <table>
+                <thead>
+                    <tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                    {% for username, user in users.items() %}
+                    <tr>
+                        <td>{{ username }}</td>
+                        <td class="role-{{ user.role }}">{{ '管理员' if user.role == 'admin' else '普通用户' }}</td>
+                        <td>{{ user.created_at }}</td>
+                        <td>
+                            {% if username != 'admin' %}
+                            <button class="btn btn-warning" onclick="resetPassword('{{ username }}')">重置密码</button>
+                            <button class="btn btn-danger" onclick="deleteUser('{{ username }}')">删除</button>
+                            {% else %}
+                            <span style="color:rgba(255,255,255,0.3)">--</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <script>
+        function showMsg(text, type) {
+            var msg = document.getElementById('msg');
+            msg.textContent = text;
+            msg.className = 'msg ' + type;
+            setTimeout(function(){ msg.className = 'msg'; }, 3000);
+        }
+        async function addUser() {
+            var data = new FormData();
+            data.append('username', document.getElementById('newUsername').value);
+            data.append('password', document.getElementById('newPassword').value);
+            data.append('role', document.getElementById('newRole').value);
+            var res = await fetch('/admin/users/add', {method: 'POST', body: data});
+            var json = await res.json();
+            if (json.success) { location.reload(); } else { showMsg(json.error, 'error'); }
+        }
+        async function deleteUser(username) {
+            if (!confirm('确定删除用户 ' + username + '？')) return;
+            await fetch('/admin/users/' + username, {method: 'DELETE'});
+            location.reload();
+        }
+        async function resetPassword(username) {
+            var res = await fetch('/admin/users/' + username + '/reset-password', {method: 'POST'});
+            var json = await res.json();
+            if (json.success) { alert('新密码: ' + json.password); } else { alert(json.error); }
+        }
+    </script>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
+</body>
+</html>'''
+
+
+DATA_HTML = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据模块 - 私密中心</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
+        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        nav .logo { font-size: 20px; font-weight: bold; }
+        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
+        nav .links a:hover { color: #e94560; }
+        .container { max-width: 1200px; margin: 30px auto; padding: 30px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 25px; transition: transform 0.2s; }
+        .card:hover { transform: translateY(-3px); border-color: rgba(233,69,96,0.5); }
+        .card h3 { color: #e94560; margin-bottom: 15px; }
+        .card p { color: rgba(255,255,255,0.6); line-height: 1.6; }
+        .placeholder { text-align: center; padding: 60px 20px; color: rgba(255,255,255,0.3); }
+        .placeholder h2 { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="logo">📊 数据模块</div>
+        <div class="links">
+            <a href="/data">数据</a>
+            <a href="/change-password">修改密码</a>
+            <a href="/logout">退出</a>
+        </div>
+    </nav>
+    <div class="container">
+        <div class="placeholder">
+            <h2>数据模块</h2>
+            <p>功能开发中，敬请期待...</p>
+        </div>
     </div>
     <script>
         var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
@@ -988,5 +1347,5 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
 
 if __name__ == "__main__":
     port = int(os.environ.get("HUB_PORT", os.environ.get("PORT", 8888)))
-    load_config()
+    init_admin()
     app.run(host="0.0.0.0", port=port, debug=False)
