@@ -669,6 +669,8 @@ for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Privat
 
 
 def nav_html(active=""):
+    user = get_current_user()
+    is_adm = user and user.get("role") == "admin"
     links = [
         ("/", "首页", "home"),
         ("/startpage", "启动页", "startpage"),
@@ -680,7 +682,7 @@ def nav_html(active=""):
     ]
     html = '<nav><div class="logo">Private Hub</div><div class="links">'
     for url, name, key in links:
-        if key == "users" and not is_admin():
+        if key == "users" and not is_adm:
             continue
         cls = ' class="active"' if key == active else ''
         html += f'<a href="{url}"{cls}>{name}</a>'
