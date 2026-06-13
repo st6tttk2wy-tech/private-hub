@@ -89,7 +89,8 @@ def load_users():
     if USERS_FILE.exists():
         try:
             users = json.loads(USERS_FILE.read_text(encoding="utf-8"))
-            # 确保默认管理员账号存�?            if "001" not in users:
+            # 确保默认管理员账号存在
+            if "001" not in users:
                 users["001"] = DEFAULT_USERS["001"].copy()
                 save_users(users)
             if users:
@@ -174,11 +175,11 @@ def change_password():
         users = load_users()
         user = users.get(username)
         if not user or hash_password(old_password) != user.get("password_hash", ""):
-            error = "原密码错�?
+            error = "原密码错误"
         elif new_password != confirm_password:
-            error = "两次输入的新密码不一�?
+            error = "两次输入的新密码不一致"
         elif len(new_password) < 4:
-            error = "密码长度不能少于4�?
+            error = "密码长度不能少于4位"
         else:
             users[username]["password_hash"] = hash_password(new_password)
             save_users(users)
@@ -207,7 +208,7 @@ def admin_add_user():
     if username in users:
         return jsonify({"error": "用户名已存在"}), 400
     if role not in ["admin", "user"]:
-        return jsonify({"error": "无效的角�?}), 400
+        return jsonify({"error": "无效的角色"}), 400
     users[username] = {
         "password_hash": hash_password(password),
         "role": role,
@@ -224,7 +225,7 @@ def admin_delete_user(username):
     users = load_users()
     admin_user = os.environ.get("ADMIN_USER", "001")
     if username == admin_user:
-        return jsonify({"error": "不能删除管理员账�?}), 400
+        return jsonify({"error": "不能删除管理员账号"}), 400
     if username in users:
         del users[username]
         save_users(users)
@@ -237,7 +238,7 @@ def admin_delete_user(username):
 def admin_reset_password(username):
     users = load_users()
     if username not in users:
-        return jsonify({"error": "用户不存�?}), 404
+        return jsonify({"error": "用户不存在"}), 404
     new_password = secrets.token_urlsafe(8)
     users[username]["password_hash"] = hash_password(new_password)
     save_users(users)
@@ -329,7 +330,7 @@ def api_bookmarks():
             "title": data.get("title", ""),
             "url": data.get("url", ""),
             "icon": data.get("icon", "🔗"),
-            "category": data.get("category", "未分�?)
+            "category": data.get("category", "未分类")
         })
         save_bookmarks(bookmarks)
         return jsonify({"success": True})
@@ -356,7 +357,7 @@ def api_create_note():
     notes_index = load_notes_index()
     notes_index.append({
         "id": note_id,
-        "title": data.get("title", "无标�?),
+        "title": data.get("title", "无标题"),
         "created": datetime.now().strftime("%Y-%m-%d %H:%M")
     })
     save_notes_index(notes_index)
@@ -382,7 +383,7 @@ def api_upload():
         return jsonify({"error": "没有文件"}), 400
     file = request.files["file"]
     if file.filename == "":
-        return jsonify({"error": "文件名为�?}), 400
+        return jsonify({"error": "文件名为空"}), 400
     
     save_path = FILES_DIR / file.filename
     file.save(str(save_path))
@@ -438,7 +439,7 @@ def save_notes_index(notes):
 
 
 DEFAULT_BOOKMARKS = [
-    {"id": "github", "title": "GitHub", "url": "https://github.com", "icon": "🐙", "category": "开�?},
+    {"id": "github", "title": "GitHub", "url": "https://github.com", "icon": "🐙", "category": "开发"},
     {"id": "google", "title": "Google", "url": "https://google.com", "icon": "🔍", "category": "搜索"},
     {"id": "youtube", "title": "YouTube", "url": "https://youtube.com", "icon": "📺", "category": "娱乐"},
 ]
@@ -494,12 +495,12 @@ LOGIN_HTML = '''<!DOCTYPE html>
         {% if error %}<div class="error">{{ error }}</div>{% endif %}
         <form method="POST">
             <div class="input-group">
-                <label>用户�?/label>
+                <label>用户名</label>
                 <input type="text" name="username" placeholder="请输入用户名" autofocus>
             </div>
             <div class="input-group">
                 <label>密码</label>
-                <input type="password" name="password" placeholder="请输入密�?>
+                <input type="password" name="password" placeholder="请输入密码">
             </div>
             <button type="submit" class="btn">登录</button>
         </form>
@@ -568,13 +569,13 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">🏠 私密中心</div>
         <div class="links">
-            <a href="/">仪表�?/a>
-            <a href="/startpage">启动�?/a>
+            <a href="/">仪表盘</a>
+            <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
             <a href="/admin/users">用户管理</a>
             <a href="/change-password">修改密码</a>
-            <a href="/logout">退�?/a>
+            <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="container">
@@ -584,25 +585,25 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         <div class="grid" style="margin-top: 30px;">
             <div class="card">
                 <h3>💻 CPU</h3>
-                <div id="cpu-info">加载�?..</div>
+                <div id="cpu-info">加载中...</div>
             </div>
             <div class="card">
                 <h3>🧠 内存</h3>
-                <div id="mem-info">加载�?..</div>
+                <div id="mem-info">加载中...</div>
             </div>
             <div class="card">
                 <h3>💾 磁盘</h3>
-                <div id="disk-info">加载�?..</div>
+                <div id="disk-info">加载中...</div>
             </div>
             <div class="card">
                 <h3>ℹ️ 系统</h3>
-                <div id="sys-info">加载�?..</div>
+                <div id="sys-info">加载中...</div>
             </div>
         </div>
         
         <h2 class="section-title">快捷访问</h2>
         <div class="quick-links">
-            <a href="/startpage" class="quick-link"><div class="icon">🚀</div><div class="name">启动�?/div></a>
+            <a href="/startpage" class="quick-link"><div class="icon">🚀</div><div class="name">启动页</div></a>
             <a href="/files" class="quick-link"><div class="icon">📁</div><div class="name">文件管理</div></a>
             <a href="/notes" class="quick-link"><div class="icon">📝</div><div class="name">笔记</div></a>
             <a href="https://github.com" class="quick-link" target="_blank"><div class="icon">🐙</div><div class="name">GitHub</div></a>
@@ -630,7 +631,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                 const data = await res.json();
                 
                 document.getElementById('cpu-info').innerHTML = `
-                    <div class="stat"><span class="label">使用�?/span><span class="value">${data.cpu_percent}%</span></div>
+                    <div class="stat"><span class="label">使用率</span><span class="value">${data.cpu_percent}%</span></div>
                     <div class="progress-bar"><div class="progress-fill ${getProgressClass(data.cpu_percent)}" style="width:${data.cpu_percent}%"></div></div>
                 `;
                 
@@ -670,7 +671,7 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>启动�?- 私密中心</title>
+    <title>启动页 - 私密中心</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -741,14 +742,14 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
 </head>
 <body>
     <nav>
-        <div class="logo">🚀 启动�?/div>
+        <div class="logo">🚀 启动页</div>
         <div class="links">
-            <a href="/">仪表�?/a>
-            <a href="/startpage">启动�?/a>
+            <a href="/">仪表盘</a>
+            <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
             <a href="/change-password">修改密码</a>
-            <a href="/logout">退�?/a>
+            <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="main">
@@ -779,7 +780,7 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
             const container = document.getElementById('bookmarksContainer');
             const categories = {};
             bookmarks.forEach(bm => {
-                const cat = bm.category || '未分�?;
+                const cat = bm.category || '未分类';
                 if (!categories[cat]) categories[cat] = [];
                 categories[cat].push(bm);
             });
@@ -809,7 +810,7 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
                 title: document.getElementById('bmTitle').value,
                 url: document.getElementById('bmUrl').value,
                 icon: document.getElementById('bmIcon').value || '🔗',
-                category: document.getElementById('bmCategory').value || '未分�?
+                category: document.getElementById('bmCategory').value || '未分类'
             };
             await fetch('/api/bookmarks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
             location.reload();
@@ -881,23 +882,23 @@ FILES_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">📁 文件管理</div>
         <div class="links">
-            <a href="/">仪表�?/a>
-            <a href="/startpage">启动�?/a>
+            <a href="/">仪表盘</a>
+            <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
             <a href="/change-password">修改密码</a>
-            <a href="/logout">退�?/a>
+            <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="container">
         <div class="breadcrumb">
-            <a href="/files">根目�?/a>
+            <a href="/files">根目录</a>
             {% if current_path %} / {{ current_path }}{% endif %}
         </div>
         
         <div class="upload-area" onclick="document.getElementById('fileInput').click()">
             <input type="file" id="fileInput" onchange="uploadFile(this)">
-            <p>📁 点击或拖拽上传文�?/p>
+            <p>📁 点击或拖拽上传文件</p>
         </div>
         
         <div class="file-list">
@@ -999,12 +1000,12 @@ NOTES_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">📝 笔记</div>
         <div class="links">
-            <a href="/">仪表�?/a>
-            <a href="/startpage">启动�?/a>
+            <a href="/">仪表盘</a>
+            <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
             <a href="/change-password">修改密码</a>
-            <a href="/logout">退�?/a>
+            <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="container">
@@ -1055,7 +1056,7 @@ NOTES_HTML = '''<!DOCTYPE html>
         }
         
         async function deleteNote(id) {
-            if (!confirm('确定删除�?)) return;
+            if (!confirm('确定删除？')) return;
             await fetch(`/api/notes/${id}`, {method: 'DELETE'});
             location.reload();
         }
@@ -1098,9 +1099,9 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
         <div class="logo">📝 笔记详情</div>
         <div class="links">
             <a href="/notes">返回列表</a>
-            <a href="/">仪表�?/a>
+            <a href="/">仪表盘</a>
             <a href="/change-password">修改密码</a>
-            <a href="/logout">退�?/a>
+            <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="container">
@@ -1144,7 +1145,7 @@ CHANGE_PWD_HTML = '''<!DOCTYPE html>
         <div class="logo">🔑 修改密码</div>
         <div class="links">
             <a href="/">返回</a>
-            <a href="/logout">退�?/a>
+            <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="container">
@@ -1154,15 +1155,15 @@ CHANGE_PWD_HTML = '''<!DOCTYPE html>
             {% if success %}<div class="success">{{ success }}</div>{% endif %}
             <form method="POST">
                 <div class="form-group">
-                    <label>原密�?/label>
+                    <label>原密码</label>
                     <input type="password" name="old_password" required>
                 </div>
                 <div class="form-group">
-                    <label>新密�?/label>
+                    <label>新密码</label>
                     <input type="password" name="new_password" required>
                 </div>
                 <div class="form-group">
-                    <label>确认新密�?/label>
+                    <label>确认新密码</label>
                     <input type="password" name="confirm_password" required>
                 </div>
                 <button type="submit" class="btn">确认修改</button>
@@ -1213,9 +1214,9 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">👥 用户管理</div>
         <div class="links">
-            <a href="/">仪表�?/a>
+            <a href="/">仪表盘</a>
             <a href="/change-password">修改密码</a>
-            <a href="/logout">退�?/a>
+            <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="container">
@@ -1223,11 +1224,11 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
             <h2>添加用户</h2>
             <div id="msg" class="msg"></div>
             <div class="form-row">
-                <input type="text" id="newUsername" placeholder="用户�?>
+                <input type="text" id="newUsername" placeholder="用户名">
                 <input type="password" id="newPassword" placeholder="密码">
                 <select id="newRole">
-                    <option value="user">普通用�?/option>
-                    <option value="admin">管理�?/option>
+                    <option value="user">普通用户</option>
+                    <option value="admin">管理员</option>
                 </select>
                 <button class="btn btn-primary" onclick="addUser()">添加</button>
             </div>
@@ -1236,13 +1237,13 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
             <h2>用户列表</h2>
             <table>
                 <thead>
-                    <tr><th>用户�?/th><th>角色</th><th>创建时间</th><th>操作</th></tr>
+                    <tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr>
                 </thead>
                 <tbody>
                     {% for username, user in users.items() %}
                     <tr>
                         <td>{{ username }}</td>
-                        <td class="role-{{ user.role }}">{{ '管理�? if user.role == 'admin' else '普通用�? }}</td>
+                        <td class="role-{{ user.role }}">{{ '管理员' if user.role == 'admin' else '普通用户' }}</td>
                         <td>{{ user.created_at }}</td>
                         <td>
                             {% if username != 'admin' %}
@@ -1275,14 +1276,14 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
             if (json.success) { location.reload(); } else { showMsg(json.error, 'error'); }
         }
         async function deleteUser(username) {
-            if (!confirm('确定删除用户 ' + username + '�?)) return;
+            if (!confirm('确定删除用户 ' + username + '？')) return;
             await fetch('/admin/users/' + username, {method: 'DELETE'});
             location.reload();
         }
         async function resetPassword(username) {
             var res = await fetch('/admin/users/' + username + '/reset-password', {method: 'POST'});
             var json = await res.json();
-            if (json.success) { alert('新密�? ' + json.password); } else { alert(json.error); }
+            if (json.success) { alert('新密码: ' + json.password); } else { alert(json.error); }
         }
     </script>
     <script>
@@ -1322,13 +1323,13 @@ DATA_HTML = '''<!DOCTYPE html>
         <div class="links">
             <a href="/data">数据</a>
             <a href="/change-password">修改密码</a>
-            <a href="/logout">退�?/a>
+            <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="container">
         <div class="placeholder">
             <h2>数据模块</h2>
-            <p>功能开发中，敬请期�?..</p>
+            <p>功能开发中，敬请期待...</p>
         </div>
     </div>
     <script>
@@ -1345,5 +1346,4 @@ DATA_HTML = '''<!DOCTYPE html>
 
 if __name__ == "__main__":
     port = int(os.environ.get("HUB_PORT", os.environ.get("PORT", 8888)))
-    app.run(host="0.0.0.0", port=port, debug=False) 
- 
+    app.run(host="0.0.0.0", port=port, debug=False)
