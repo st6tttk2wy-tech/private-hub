@@ -30,13 +30,14 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = 86400 * 7
 
 BASE_DIR = Path(__file__).parent
-CONFIG_DIR = BASE_DIR / "config"
-DATA_DIR = BASE_DIR / "data"
-FILES_DIR = BASE_DIR / "files"
-NOTES_DIR = BASE_DIR / "notes"
+PERSISTENT_DIR = Path(os.environ.get("PERSISTENT_DIR", BASE_DIR / "data"))
+CONFIG_DIR = PERSISTENT_DIR / "config"
+DATA_DIR = PERSISTENT_DIR / "data"
+FILES_DIR = PERSISTENT_DIR / "files"
+NOTES_DIR = PERSISTENT_DIR / "notes"
 
 for d in [CONFIG_DIR, DATA_DIR, FILES_DIR, NOTES_DIR]:
-    d.mkdir(exist_ok=True)
+    d.mkdir(parents=True, exist_ok=True)
 
 CONFIG_FILE = CONFIG_DIR / "auth.json"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
