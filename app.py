@@ -229,21 +229,16 @@ def is_admin():
 
 
 def get_nav(active=""):
-    user = get_current_user()
-    is_adm = user and user.get("role") == "admin"
     links = [
         ("/", "首页", "home"),
         ("/news", "信息管理", "news"),
         ("/data", "数据管理", "data"),
         ("/files", "文件管理", "files"),
         ("/notes", "笔记管理", "notes"),
-    ]
-    if is_adm:
-        links.append(("/admin/users", "用户管理", "users"))
-    links.extend([
+        ("/admin/users", "用户管理", "users"),
         ("/change-password", "密码管理", "password"),
         ("/logout", "退出", "logout"),
-    ])
+    ]
     html = '<nav><div class="logo">Private Hub</div><div class="links">'
     for url, name, key in links:
         cls = ' class="active"' if key == active else ''
@@ -1010,12 +1005,13 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
     <div class="main-layout">
         <div class="sidebar">
             <div class="sidebar-title">快捷访问</div>
-            <a href="/startpage" class="sidebar-link"><span class="icon">🚀</span>启动页</a>
+            <a href="/news" class="sidebar-link"><span class="icon">📰</span>信息管理</a>
+            <a href="/data" class="sidebar-link"><span class="icon">📊</span>数据管理</a>
             <a href="/files" class="sidebar-link"><span class="icon">📁</span>文件管理</a>
-            <a href="/notes" class="sidebar-link"><span class="icon">📝</span>笔记</a>
-            <a href="/change-password" class="sidebar-link"><span class="icon">🔑</span>修改密码</a>
+            <a href="/notes" class="sidebar-link"><span class="icon">📝</span>笔记管理</a>
             <a href="/admin/users" class="sidebar-link"><span class="icon">👥</span>用户管理</a>
-            <a href="/data" class="sidebar-link"><span class="icon">📊</span>数据操作</a>
+            <a href="/change-password" class="sidebar-link"><span class="icon">🔑</span>密码管理</a>
+            <a href="/logs" class="sidebar-link"><span class="icon">📋</span>操作日志</a>
         </div>
         <div class="container">
             <div id="time"></div>
@@ -2082,8 +2078,9 @@ NEWS_HTML = '''<!DOCTYPE html>
         .news-panel { display: none; }
         .news-panel.active { display: block; }
         .news-list { background: rgba(255,255,255,0.03); border-radius: 12px; overflow: hidden; }
-        .news-item { display: flex; align-items: center; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s; }
+        .news-item { display: flex; flex-direction: column; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s; }
         .news-item:hover { background: rgba(255,255,255,0.05); }
+        .news-header { display: flex; align-items: center; }
         .news-rank { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; margin-right: 15px; flex-shrink: 0; }
         .news-rank.top3 { background: #e94560; color: #fff; }
         .news-rank.normal { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
@@ -2091,6 +2088,7 @@ NEWS_HTML = '''<!DOCTYPE html>
         .news-title a { color: inherit; text-decoration: none; }
         .news-title a:hover { color: #e94560; }
         .news-hot { color: #e94560; font-size: 12px; margin-left: 10px; }
+        .news-desc { margin-top: 8px; font-size: 13px; color: rgba(255,255,255,0.5); line-height: 1.5; }
         .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
         .section-title { font-size: 18px; color: rgba(255,255,255,0.9); }
         .update-time { font-size: 12px; color: rgba(255,255,255,0.4); }
@@ -2118,9 +2116,12 @@ NEWS_HTML = '''<!DOCTYPE html>
             <div class="news-list">
                 {% for item in news[source_id].items %}
                 <div class="news-item">
-                    <div class="news-rank {{ 'top3' if loop.index <= 3 else 'normal' }}">{{ loop.index }}</div>
-                    <div class="news-title"><a href="{{ item.url }}" target="_blank">{{ item.title }}</a></div>
-                    {% if item.hot %}<div class="news-hot">{{ item.hot }}</div>{% endif %}
+                    <div class="news-header">
+                        <div class="news-rank {{ 'top3' if loop.index <= 3 else 'normal' }}">{{ loop.index }}</div>
+                        <div class="news-title"><a href="{{ item.url }}" target="_blank">{{ item.title }}</a></div>
+                        {% if item.hot %}<div class="news-hot">{{ item.hot }}</div>{% endif %}
+                    </div>
+                    {% if item.desc %}<div class="news-desc">{{ item.desc }}</div>{% endif %}
                 </div>
                 {% endfor %}
             </div>
