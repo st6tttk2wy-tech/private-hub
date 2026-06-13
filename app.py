@@ -253,9 +253,7 @@ def data_module():
 
 @app.route("/")
 @login_required
-def dashboard():
-    if not is_admin():
-        return redirect(url_for("data_module"))
+def home():
     return render_template_string(DASHBOARD_HTML)
 
 
@@ -300,6 +298,41 @@ def download(filepath):
     if not file_path.exists() or not file_path.is_relative_to(FILES_DIR) or file_path.is_dir():
         abort(404)
     return send_file(file_path, as_attachment=True)
+
+
+@app.route("/preview/<path:filepath>")
+@login_required
+def preview(filepath):
+    file_path = FILES_DIR / filepath
+    if not file_path.exists() or not file_path.is_relative_to(FILES_DIR) or file_path.is_dir():
+        abort(404)
+    
+    file_size = file_path.stat().st_size
+    ext = file_path.suffix.lower()
+    
+    MAX_PREVIEW_SIZE = 500 * 1024  # 500KB
+    text_exts = ['.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.csv', '.log', '.ini', '.cfg', '.yml', '.yaml']
+    img_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp']
+    
+    if ext in img_exts:
+        return send_file(file_path)
+    elif ext in text_exts:
+        if file_size > MAX_PREVIEW_SIZE:
+            content = file_path.read_text(encoding="utf-8", errors="replace")[:MAX_PREVIEW_SIZE] + "\n\n... (文件过大，仅显示前500KB)"
+        else:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        return render_template_string(PREVIEW_TEXT_HTML, content=content, filename=filepath, ext=ext)
+    elif ext == '.pdf':
+        return send_file(file_path, mimetype='application/pdf')
+    else:
+        if file_size > MAX_PREVIEW_SIZE:
+            return send_file(file_path, as_attachment=True)
+        content = file_path.read_bytes()[:MAX_PREVIEW_SIZE]
+        try:
+            text = content.decode("utf-8", errors="replace")
+            return render_template_string(PREVIEW_TEXT_HTML, content=text, filename=filepath, ext=ext)
+        except:
+            return send_file(file_path, as_attachment=True)
 
 
 @app.route("/api/delete/<path:filepath>", methods=["DELETE"])
@@ -726,6 +759,17 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         .section-title { font-size: 18px; margin-bottom: 20px; color: rgba(255,255,255,0.9); }
         #time { font-size: 48px; font-weight: 300; text-align: center; margin: 20px 0; }
         #date { text-align: center; color: rgba(255,255,255,0.5); }
+        .data-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+        .data-card {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px; padding: 20px; text-align: center;
+        }
+        .data-card .icon { font-size: 28px; margin-bottom: 8px; }
+        .data-card .count { font-size: 24px; font-weight: bold; color: #e94560; }
+        .data-card .label { font-size: 12px; color: rgba(255,255,255,0.5); }
+        .export-btn { padding: 10px 20px; background: rgba(0,184,148,0.2); border: 1px solid rgba(0,184,148,0.5); border-radius: 8px; color: #fff; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+        .export-btn:hover { background: #00b894; }
+        .chart-card { grid-column: span 2; }
         .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
         .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
     </style>
@@ -734,8 +778,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">🏠 私密中心</div>
         <div class="links">
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
+            <a href="/">首页</a>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
@@ -748,7 +791,13 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         <div id="time"></div>
         <div id="date"></div>
         
-        <div class="grid" style="margin-top: 30px;">
+        <div class="data-row" style="margin-top: 30px;">
+            <div class="data-card"><div class="icon">🔗</div><div class="count" id="bm-val">--</div><div class="label">书签</div></div>
+            <div class="data-card"><div class="icon">📝</div><div class="count" id="note-val">--</div><div class="label">笔记</div></div>
+            <div class="data-card"><div class="icon">📁</div><div class="count" id="file-val">--</div><div class="label">文件</div></div>
+        </div>
+        
+        <div class="grid">
             <div class="card">
                 <h3>💻 CPU</h3>
                 <div id="cpu-info">加载中...</div>
@@ -765,6 +814,10 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                 <h3>ℹ️ 系统</h3>
                 <div id="sys-info">加载中...</div>
             </div>
+            <div class="card chart-card">
+                <h3>📊 系统监控</h3>
+                <canvas id="usageChart" height="120"></canvas>
+            </div>
         </div>
         
         <h2 class="section-title">快捷访问</h2>
@@ -772,10 +825,13 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             <a href="/startpage" class="quick-link"><div class="icon">🚀</div><div class="name">启动页</div></a>
             <a href="/files" class="quick-link"><div class="icon">📁</div><div class="name">文件管理</div></a>
             <a href="/notes" class="quick-link"><div class="icon">📝</div><div class="name">笔记</div></a>
-            <a href="https://github.com" class="quick-link" target="_blank"><div class="icon">🐙</div><div class="name">GitHub</div></a>
+            <a href="/change-password" class="quick-link"><div class="icon">🔑</div><div class="name">修改密码</div></a>
+            <a href="/admin/users" class="quick-link"><div class="icon">👥</div><div class="name">用户管理</div></a>
+            <a href="#" class="quick-link" onclick="exportData()"><div class="icon">📥</div><div class="name">导出数据</div></a>
         </div>
     </div>
     
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
         function updateTime() {
             const now = new Date();
@@ -790,6 +846,21 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             if (percent > 60) return 'yellow';
             return 'green';
         }
+        
+        var cpuH=[], memH=[], diskH=[], labels=[];
+        var ctx = document.getElementById('usageChart');
+        var chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: labels, datasets: [
+                { label: 'CPU', data: cpuH, borderColor: '#e94560', backgroundColor: 'rgba(233,69,96,0.1)', fill: true, tension: 0.3, pointRadius: 0 },
+                { label: '内存', data: memH, borderColor: '#00b894', backgroundColor: 'rgba(0,184,148,0.1)', fill: true, tension: 0.3, pointRadius: 0 },
+                { label: '磁盘', data: diskH, borderColor: '#fdcb6e', backgroundColor: 'rgba(253,203,110,0.1)', fill: true, tension: 0.3, pointRadius: 0 }
+            ]},
+            options: { responsive: true, animation: { duration: 300 },
+                scales: { y: { beginAtZero: true, max: 100, ticks: { color: 'rgba(255,255,255,0.3)' }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { ticks: { display: false }, grid: { display: false } } },
+                plugins: { legend: { labels: { color: 'rgba(255,255,255,0.5)', usePointStyle: true, pointStyle: 'circle' } } }
+            }
+        });
         
         async function loadSystemInfo() {
             try {
@@ -816,13 +887,32 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                     <div class="stat"><span class="label">主机</span><span class="value">${data.hostname}</span></div>
                     <div class="stat"><span class="label">运行</span><span class="value">${data.uptime}</span></div>
                 `;
+                
+                var t = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+                labels.push(t); cpuH.push(data.cpu_percent); memH.push(data.memory_percent); diskH.push(data.disk_percent);
+                if (labels.length > 30) { labels.shift(); cpuH.shift(); memH.shift(); diskH.shift(); }
+                chart.update();
             } catch(e) {
                 console.error('加载系统信息失败:', e);
             }
         }
         
+        async function loadStats() {
+            try {
+                var r = await fetch('/api/data/stats');
+                var d = await r.json();
+                document.getElementById('bm-val').textContent = d.bookmarks;
+                document.getElementById('note-val').textContent = d.notes;
+                document.getElementById('file-val').textContent = d.files;
+            } catch(e) {}
+        }
+        
+        function exportData() { window.open('/api/data/export', '_blank'); }
+        
         loadSystemInfo();
+        loadStats();
         setInterval(loadSystemInfo, 5000);
+        setInterval(loadStats, 30000);
     </script>
     <script>
         var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
@@ -1141,6 +1231,8 @@ FILES_HTML = '''<!DOCTYPE html>
         async function uploadFile(input) {
             const file = input.files[0];
             if (!file) return;
+            var btn = document.querySelector('.upload-area');
+            btn.innerHTML = '<p>上传中...</p>';
             const formData = new FormData();
             formData.append('file', file);
             await fetch('/api/upload', {method: 'POST', body: formData});
@@ -1263,7 +1355,9 @@ NOTES_HTML = '''<!DOCTYPE html>
                 <button type="submit" class="btn btn-primary">搜索</button>
                 {% if query %}<a href="/notes" class="btn btn-secondary" style="text-decoration:none;display:flex;align-items:center;">清除</a>{% endif %}
             </form>
-            <button class="btn btn-primary" onclick="openModal()">+ 新建笔记</button>
+            <button class="btn btn-primary" onclick="openModal('addModal')">+ 新建笔记</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('noteFileInput').click()" style="background:rgba(0,184,148,0.2);border:1px solid rgba(0,184,148,0.5);color:#fff;">上传笔记</button>
+            <input type="file" id="noteFileInput" accept=".md,.txt" style="display:none" onchange="uploadNote(this)">
         </div>
         
         <div class="note-list">
@@ -1335,6 +1429,19 @@ NOTES_HTML = '''<!DOCTYPE html>
                 })
             });
             closeModal('addModal');
+            location.reload();
+        }
+        
+        async function uploadNote(input) {
+            var file = input.files[0];
+            if (!file) return;
+            var content = await file.text();
+            var title = file.name.replace(/\.(md|txt)$/, '');
+            await fetch('/api/notes', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({title: title, content: content})
+            });
             location.reload();
         }
         
@@ -1884,6 +1991,39 @@ SHARED_NOTE_HTML = '''<!DOCTYPE html>
     </div>
     <div class="container">
         <div class="content">{{ content }}</div>
+    </div>
+</body>
+</html>'''
+
+
+PREVIEW_TEXT_HTML = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ filename }} - 预览</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
+        .header { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 16px; color: #e94560; }
+        .header a { color: rgba(255,255,255,0.7); text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 8px; font-size: 13px; }
+        .header a:hover { background: rgba(233,69,96,0.3); }
+        .container { max-width: 1000px; margin: 30px auto; padding: 0 30px; }
+        .content { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 25px; }
+        pre { white-space: pre-wrap; word-wrap: break-word; line-height: 1.6; font-size: 13px; color: rgba(255,255,255,0.8); font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{{ filename }}</h1>
+        <div>
+            <a href="/download/{{ filename }}">下载</a>
+            <a href="/files">返回</a>
+        </div>
+    </div>
+    <div class="container">
+        <div class="content"><pre>{{ content }}</pre></div>
     </div>
 </body>
 </html>'''
