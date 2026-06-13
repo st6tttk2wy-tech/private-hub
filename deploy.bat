@@ -1,27 +1,26 @@
 @echo off
-chcp 65001 >nul
 echo ========================================
-echo   部署到 Railway
+echo   Deploy to Railway
 echo ========================================
 echo.
 
 cd /d F:\mimo
 
-echo [1/3] 添加文件...
-git add app.py wsgi.py Procfile requirements.txt .gitignore
+echo [1/3] Adding files...
+git add app.py wsgi.py Procfile requirements.txt .gitignore deploy.bat
 
-echo [2/3] 提交更改...
-set /p msg="请输入提交说明（直接回车使用默认说明）: "
-if "%msg%"=="" set msg=更新网站
+echo [2/3] Committing...
+set /p msg="Enter commit message (or press Enter for default): "
+if "%msg%"=="" set msg=update website
 git commit -m "%msg%"
 
-echo [3/3] 推送到GitHub...
+echo [3/3] Pushing to GitHub...
 git push origin master
 
 echo.
 echo ========================================
-echo   部署完成！Railway将自动重新构建
+echo   Done! Railway will auto rebuild
 echo ========================================
-echo   Railway控制台: https://railway.com/dashboard
+echo   https://railway.com/dashboard
 echo ========================================
 pause
