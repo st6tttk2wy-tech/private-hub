@@ -88,23 +88,20 @@ def save_users(users):
 
 def init_admin():
     users = load_users()
-    if "admin" in users:
+    if users:
         return
-    env_password = os.environ.get("HUB_PASSWORD")
-    if env_password:
-        password = env_password
-    else:
-        password = secrets.token_urlsafe(8)
-        print(f"\n{'='*50}")
-        print(f"首次启动 - 管理员密码: {password}")
-        print(f"请妥善保存，下次登录需要使用此密码")
-        print(f"{'='*50}\n")
-    users["admin"] = {
-        "password_hash": hash_password(password),
+    admin_user = os.environ.get("ADMIN_USER", "001")
+    admin_pass = os.environ.get("ADMIN_PASS", "123456")
+    users[admin_user] = {
+        "password_hash": hash_password(admin_pass),
         "role": "admin",
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     save_users(users)
+    print(f"\n{'='*50}")
+    print(f"管理员账号: {admin_user}")
+    print(f"管理员密码: {admin_pass}")
+    print(f"{'='*50}\n")
 
 
 def get_current_user():
@@ -224,9 +221,10 @@ def admin_add_user():
 @login_required
 @admin_required
 def admin_delete_user(username):
-    if username == "admin":
-        return jsonify({"error": "不能删除管理员账号"}), 400
     users = load_users()
+    admin_user = os.environ.get("ADMIN_USER", "001")
+    if username == admin_user:
+        return jsonify({"error": "不能删除管理员账号"}), 400
     if username in users:
         del users[username]
         save_users(users)
