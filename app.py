@@ -389,7 +389,7 @@ def admin_reset_password(username):
 @app.route("/data")
 @login_required
 def data_module():
-    return render_template_string(DATA_HTML)
+    return render_template_string(DATA_HTML, nav=get_nav("data"))
 
 
 @app.route("/")
@@ -446,11 +446,6 @@ def undo_log(log_id):
     log_entry["undone_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_ops_log(logs)
     return jsonify({"success": True})
-
-@app.route("/data")
-@login_required
-def data_module():
-    return render_template_string(DATA_HTML, nav=get_nav("data"))
 
 
 @app.route("/startpage")
