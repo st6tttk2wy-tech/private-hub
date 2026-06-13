@@ -371,9 +371,11 @@ def admin_delete_user(username):
     if username == admin_user:
         return jsonify({"error": "不能删除管理员账号"}), 400
     if username in users:
+        user_data = users[username].copy()
         del users[username]
         save_users(users)
-        add_log("删除用户", f"管理员删除用户 {username}", user=session.get("username"))
+        add_log("删除用户", f"管理员删除用户 {username}", user=session.get("username"),
+               reversible=True, reverse_data={"username": username, "user_data": user_data})
     return jsonify({"success": True})
 
 
@@ -446,6 +448,56 @@ def undo_log(log_id):
         return jsonify({"error": "日志不存在"}), 404
     if not log_entry.get("reversible"):
         return jsonify({"error": "此操作不可撤销"}), 400
+    
+    reverse_data = log_entry.get("reverse_data", {})
+    action = log_entry.get("action", "")
+    
+    # 撤销删除笔记
+    if action == "删除笔记":
+        note_id = reverse_data.get("note_id")
+        title = reverse_data.get("title", "未知")
+        content = reverse_data.get("content", "")
+        if note_id:
+            note_file = NOTES_DIR / f"{note_id}.md"
+            note_file.write_text(content, encoding="utf-8")
+            notes_index = load_notes_index()
+            notes_index.append({"id": note_id, "title": title, "created": datetime.now().strftime("%Y-%m-%d %H:%M")})
+            save_notes_index(notes_index)
+    
+    # 撤销删除文件
+    elif action in ["删除文件", "删除文件夹"]:
+        filepath = reverse_data.get("filepath")
+        backup = reverse_data.get("backup")
+        if filepath and backup:
+            backup_path = Path(backup)
+            target_path = FILES_DIR / filepath
+            if backup_path.exists():
+                if backup_path.is_dir():
+                    import shutil
+                    shutil.copytree(backup_path, target_path)
+                else:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(backup_path, target_path)
+    
+    # 撤销修改密码
+    elif action == "修改密码":
+        username = reverse_data.get("username")
+        old_hash = reverse_data.get("old_hash")
+        if username and old_hash:
+            users = load_users()
+            if username in users:
+                users[username]["password_hash"] = old_hash
+                save_users(users)
+    
+    # 撤销删除用户
+    elif action == "删除用户":
+        username = reverse_data.get("username")
+        user_data = reverse_data.get("user_data")
+        if username and user_data:
+            users = load_users()
+            users[username] = user_data
+            save_users(users)
+    
     log_entry["undone"] = True
     log_entry["undone_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_ops_log(logs)
@@ -538,11 +590,19 @@ def api_delete_file(filepath):
         return jsonify({"error": "文件不存在"}), 404
     if file_path.is_dir():
         import shutil
+        backup_dir = FILES_DIR / "_backup" / datetime.now().strftime("%Y%m%d%H%M%S")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(file_path, backup_dir / filepath.replace("/", "_"))
         shutil.rmtree(file_path)
-        add_log("删除文件夹", f"删除文件夹: {filepath}", user=session.get("username"))
+        add_log("删除文件夹", f"删除文件夹: {filepath}", user=session.get("username"),
+               reversible=True, reverse_data={"filepath": filepath, "backup": str(backup_dir / filepath.replace("/", "_"))})
     else:
+        backup_dir = FILES_DIR / "_backup" / datetime.now().strftime("%Y%m%d%H%M%S")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file_path, backup_dir / file_path.name)
         file_path.unlink()
-        add_log("删除文件", f"删除文件: {filepath}", user=session.get("username"))
+        add_log("删除文件", f"删除文件: {filepath}", user=session.get("username"),
+               reversible=True, reverse_data={"filepath": filepath, "backup": str(backup_dir / file_path.name)})
     return jsonify({"success": True})
 
 
@@ -690,7 +750,9 @@ def api_create_note():
 def api_delete_note(note_id):
     note_file = NOTES_DIR / f"{note_id}.md"
     title = "未知"
+    content = ""
     if note_file.exists():
+        content = note_file.read_text(encoding="utf-8")
         note_file.unlink()
     notes_index = load_notes_index()
     for n in notes_index:
@@ -699,7 +761,8 @@ def api_delete_note(note_id):
             break
     notes_index = [n for n in notes_index if n.get("id") != note_id]
     save_notes_index(notes_index)
-    add_log("删除笔记", f"删除笔记: {title}", user=session.get("username"))
+    add_log("删除笔记", f"删除笔记: {title}", user=session.get("username"), 
+           reversible=True, reverse_data={"note_id": note_id, "title": title, "content": content})
     return jsonify({"success": True})
 
 
@@ -1936,6 +1999,8 @@ CHANGE_PWD_HTML = '''<!DOCTYPE html>
         .btn:hover { background: #c23152; }
         .error { color: #ff6b6b; margin-bottom: 15px; font-size: 14px; }
         .success { color: #00b894; margin-bottom: 15px; font-size: 14px; }
+        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
+        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
     </style>
 </head>
 <body>
@@ -1943,8 +2008,12 @@ CHANGE_PWD_HTML = '''<!DOCTYPE html>
         <div class="logo">🔑 修改密码</div>
         <div class="links">
             <a href="/">首页</a>
-            <a href="/data">数据</a>
-            <a href="/change-password">修改密码</a>
+            <a href="/news">信息管理</a>
+            <a href="/data">数据管理</a>
+            <a href="/files">文件管理</a>
+            <a href="/notes">笔记管理</a>
+            <a href="/admin/users">用户管理</a>
+            <a href="/change-password">密码管理</a>
             <a href="/logout">退出</a>
         </div>
     </nav>
