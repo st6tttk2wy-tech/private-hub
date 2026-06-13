@@ -1,0 +1,17 @@
+# 配置文件
+config/
+
+# 数据目录
+data/
+files/
+notes/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# IDE
+.vscode/
+.idea/
