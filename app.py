@@ -89,19 +89,29 @@ def save_users(users):
 def init_admin():
     users = load_users()
     admin_user = os.environ.get("ADMIN_USER", "001")
-    if admin_user in users:
-        return
     admin_pass = os.environ.get("ADMIN_PASS", "123456")
-    users[admin_user] = {
-        "password_hash": hash_password(admin_pass),
-        "role": "admin",
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
-    }
-    save_users(users)
-    print(f"\n{'='*50}")
-    print(f"管理员账号: {admin_user}")
-    print(f"管理员密码: {admin_pass}")
-    print(f"{'='*50}\n")
+    
+    # 创建新管理员账号（如果不存在）
+    if admin_user not in users:
+        users[admin_user] = {
+            "password_hash": hash_password(admin_pass),
+            "role": "admin",
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+        }
+        save_users(users)
+        print(f"\n{'='*50}")
+        print(f"已创建管理员账号: {admin_user}")
+        print(f"管理员密码: {admin_pass}")
+        print(f"{'='*50}\n")
+    
+    # 确保旧账号也能登录
+    if "admin" not in users:
+        users["admin"] = {
+            "password_hash": hash_password(admin_pass),
+            "role": "admin",
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+        }
+        save_users(users)
 
 
 def get_current_user():
