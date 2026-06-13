@@ -292,7 +292,7 @@ def login():
         if user and hash_password(password) == user.get("password_hash", ""):
             session["logged_in"] = True
             session["username"] = username
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
         error = "用户名或密码错误"
     return render_template_string(LOGIN_HTML, error=error)
 
