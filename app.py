@@ -397,7 +397,7 @@ def data_module():
 @app.route("/")
 @login_required
 def home():
-    return render_template_string(DASHBOARD_HTML)
+    return render_template_string(DASHBOARD_HTML, nav=get_nav("home"))
 
 
 
