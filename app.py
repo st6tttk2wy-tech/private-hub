@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-私密中心 (Private Hub)
+私密中心 (Private Hub) - 重构版
 """
 
 import os
@@ -9,6 +9,7 @@ import json
 import hashlib
 import secrets
 import platform
+import shutil
 from datetime import datetime
 from pathlib import Path
 from functools import wraps
@@ -39,38 +40,15 @@ NOTES_DIR = PERSISTENT_DIR / "notes"
 for d in [CONFIG_DIR, DATA_DIR, FILES_DIR, NOTES_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-CONFIG_FILE = CONFIG_DIR / "auth.json"
 USERS_FILE = CONFIG_DIR / "users.json"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
 NOTES_INDEX = DATA_DIR / "notes_index.json"
+SHARES_FILE = CONFIG_DIR / "shares.json"
 
-WATERMARK_CSS = '''
-.watermark {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none; z-index: 9999; overflow: hidden;
-}
-.watermark span {
-    position: absolute; font-size: 16px; color: rgba(255,255,255,0.03);
-    transform: rotate(-30deg); white-space: nowrap; user-select: none;
-}
-'''
 
-WATERMARK_JS = '''
-function createWatermark(text) {
-    var container = document.createElement('div');
-    container.className = 'watermark';
-    document.body.appendChild(container);
-    for (var i = 0; i < 50; i++) {
-        var span = document.createElement('span');
-        span.textContent = text;
-        span.style.left = (Math.random() * 100) + '%';
-        span.style.top = (Math.random() * 100) + '%';
-        container.appendChild(span);
-    }
-}
-createWatermark('Private Hub');
-'''
-
+# ============================================================================
+# 工具函数
+# ============================================================================
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -89,7 +67,6 @@ def load_users():
     if USERS_FILE.exists():
         try:
             users = json.loads(USERS_FILE.read_text(encoding="utf-8"))
-            # 确保默认管理员账号存在
             if "001" not in users:
                 users["001"] = DEFAULT_USERS["001"].copy()
                 save_users(users)
@@ -136,8 +113,48 @@ def admin_required(f):
     return decorated
 
 
+def load_bookmarks():
+    if BOOKMARKS_FILE.exists():
+        return json.loads(BOOKMARKS_FILE.read_text(encoding="utf-8"))
+    return DEFAULT_BOOKMARKS
+
+
+def save_bookmarks(bookmarks):
+    BOOKMARKS_FILE.write_text(json.dumps(bookmarks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_notes_index():
+    if NOTES_INDEX.exists():
+        return json.loads(NOTES_INDEX.read_text(encoding="utf-8"))
+    return []
+
+
+def save_notes_index(notes):
+    NOTES_INDEX.write_text(json.dumps(notes, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_shares():
+    if SHARES_FILE.exists():
+        try:
+            return json.loads(SHARES_FILE.read_text(encoding="utf-8"))
+        except:
+            pass
+    return {}
+
+
+def save_shares(shares):
+    SHARES_FILE.write_text(json.dumps(shares, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+DEFAULT_BOOKMARKS = [
+    {"id": "github", "title": "GitHub", "url": "https://github.com", "icon": "🐙", "category": "开发"},
+    {"id": "google", "title": "Google", "url": "https://google.com", "icon": "🔍", "category": "搜索"},
+    {"id": "youtube", "title": "YouTube", "url": "https://youtube.com", "icon": "📺", "category": "娱乐"},
+]
+
+
 # ============================================================================
-# 路由
+# 路由 - 认证
 # ============================================================================
 
 @app.route("/login", methods=["GET", "POST"])
@@ -151,7 +168,7 @@ def login():
         if user and hash_password(password) == user.get("password_hash", ""):
             session["logged_in"] = True
             session["username"] = username
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("home"))
         error = "用户名或密码错误"
     return render_template_string(LOGIN_HTML, error=error)
 
@@ -186,6 +203,10 @@ def change_password():
             success = "密码修改成功"
     return render_template_string(CHANGE_PWD_HTML, error=error, success=success)
 
+
+# ============================================================================
+# 路由 - 管理员
+# ============================================================================
 
 @app.route("/admin/users")
 @login_required
@@ -245,18 +266,14 @@ def admin_reset_password(username):
     return jsonify({"success": True, "password": new_password})
 
 
-@app.route("/data")
-@login_required
-def data_module():
-    return render_template_string(DATA_HTML)
-
+# ============================================================================
+# 路由 - 页面
+# ============================================================================
 
 @app.route("/")
 @login_required
-def dashboard():
-    if not is_admin():
-        return redirect(url_for("data_module"))
-    return render_template_string(DASHBOARD_HTML)
+def home():
+    return render_template_string(HOME_HTML)
 
 
 @app.route("/startpage")
@@ -275,10 +292,8 @@ def files(filepath=None):
     base_path = FILES_DIR / filepath
     if not base_path.exists() or not base_path.is_relative_to(FILES_DIR):
         abort(404)
-    
     if base_path.is_file():
         return send_file(base_path)
-    
     items = []
     for item in sorted(base_path.iterdir()):
         rel_path = item.relative_to(FILES_DIR)
@@ -289,9 +304,45 @@ def files(filepath=None):
             "size": item.stat().st_size if item.is_file() else 0,
             "modified": datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
         })
-    
     return render_template_string(FILES_HTML, items=items, current_path=filepath)
 
+
+@app.route("/notes")
+@login_required
+def notes():
+    notes_list = load_notes_index()
+    query = request.args.get("q", "").strip()
+    if query:
+        filtered = []
+        for note in notes_list:
+            title_match = query.lower() in note.get("title", "").lower()
+            note_file = NOTES_DIR / f"{note['id']}.md"
+            content_match = False
+            if note_file.exists():
+                content = note_file.read_text(encoding="utf-8", errors="replace")
+                content_match = query.lower() in content.lower()
+            if title_match or content_match:
+                filtered.append(note)
+        notes_list = filtered
+    return render_template_string(NOTES_HTML, notes=notes_list, query=query)
+
+
+@app.route("/notes/<note_id>")
+@login_required
+def note_detail(note_id):
+    note_file = NOTES_DIR / f"{note_id}.md"
+    if not note_file.exists():
+        abort(404)
+    content = note_file.read_text(encoding="utf-8")
+    notes_index = load_notes_index()
+    note = next((n for n in notes_index if n["id"] == note_id), {})
+    title = note.get("title", "无标题")
+    return render_template_string(NOTE_DETAIL_HTML, content=content, note_id=note_id, title=title)
+
+
+# ============================================================================
+# 路由 - 文件API
+# ============================================================================
 
 @app.route("/download/<path:filepath>")
 @login_required
@@ -327,35 +378,64 @@ def preview(filepath):
             return send_file(file_path, as_attachment=True)
 
 
-@app.route("/notes")
+@app.route("/api/upload", methods=["POST"])
 @login_required
-def notes():
-    notes_list = load_notes_index()
-    query = request.args.get("q", "").strip()
-    if query:
-        filtered = []
-        for note in notes_list:
-            title_match = query.lower() in note.get("title", "").lower()
-            note_file = NOTES_DIR / f"{note['id']}.md"
-            content_match = False
-            if note_file.exists():
-                content = note_file.read_text(encoding="utf-8", errors="replace")
-                content_match = query.lower() in content.lower()
-            if title_match or content_match:
-                filtered.append(note)
-        notes_list = filtered
-    return render_template_string(NOTES_HTML, notes=notes_list, query=query)
+def api_upload():
+    if "file" not in request.files:
+        return jsonify({"error": "没有文件"}), 400
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "文件名为空"}), 400
+    save_path = FILES_DIR / file.filename
+    file.save(str(save_path))
+    return jsonify({"success": True, "path": file.filename})
 
 
-@app.route("/notes/<note_id>")
+@app.route("/api/delete/<path:filepath>", methods=["DELETE"])
 @login_required
-def note_detail(note_id):
-    note_file = NOTES_DIR / f"{note_id}.md"
-    if not note_file.exists():
-        abort(404)
-    content = note_file.read_text(encoding="utf-8")
-    return render_template_string(NOTE_DETAIL_HTML, content=content, note_id=note_id)
+def api_delete_file(filepath):
+    file_path = FILES_DIR / filepath
+    if not file_path.exists() or not file_path.is_relative_to(FILES_DIR):
+        return jsonify({"error": "文件不存在"}), 404
+    if file_path.is_dir():
+        shutil.rmtree(file_path)
+    else:
+        file_path.unlink()
+    return jsonify({"success": True})
 
+
+@app.route("/api/rename/<path:filepath>", methods=["POST"])
+@login_required
+def api_rename_file(filepath):
+    file_path = FILES_DIR / filepath
+    if not file_path.exists() or not file_path.is_relative_to(FILES_DIR):
+        return jsonify({"error": "文件不存在"}), 404
+    new_name = request.json.get("name", "").strip()
+    if not new_name:
+        return jsonify({"error": "新文件名不能为空"}), 400
+    new_path = file_path.parent / new_name
+    if new_path.exists():
+        return jsonify({"error": "文件名已存在"}), 400
+    file_path.rename(new_path)
+    return jsonify({"success": True})
+
+
+@app.route("/api/share/<path:filepath>", methods=["POST"])
+@login_required
+def api_share_file(filepath):
+    file_path = FILES_DIR / filepath
+    if not file_path.exists() or not file_path.is_relative_to(FILES_DIR):
+        return jsonify({"error": "文件不存在"}), 404
+    token = secrets.token_urlsafe(16)
+    shares = load_shares()
+    shares[token] = {"path": filepath, "type": "file", "created": datetime.now().isoformat()}
+    save_shares(shares)
+    return jsonify({"success": True, "token": token, "url": f"/s/{token}"})
+
+
+# ============================================================================
+# 路由 - 笔记API
+# ============================================================================
 
 @app.route("/api/bookmarks", methods=["GET", "POST"])
 @login_required
@@ -391,7 +471,6 @@ def api_create_note():
     note_id = secrets.token_hex(8)
     note_file = NOTES_DIR / f"{note_id}.md"
     note_file.write_text(data.get("content", ""), encoding="utf-8")
-    
     notes_index = load_notes_index()
     notes_index.append({
         "id": note_id,
@@ -414,19 +493,50 @@ def api_delete_note(note_id):
     return jsonify({"success": True})
 
 
-@app.route("/api/upload", methods=["POST"])
+@app.route("/api/notes/<note_id>/rename", methods=["POST"])
 @login_required
-def api_upload():
-    if "file" not in request.files:
-        return jsonify({"error": "没有文件"}), 400
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "文件名为空"}), 400
-    
-    save_path = FILES_DIR / file.filename
-    file.save(str(save_path))
-    return jsonify({"success": True, "path": file.filename})
+def api_rename_note(note_id):
+    new_title = request.json.get("title", "").strip()
+    if not new_title:
+        return jsonify({"error": "标题不能为空"}), 400
+    notes_index = load_notes_index()
+    for note in notes_index:
+        if note["id"] == note_id:
+            note["title"] = new_title
+            break
+    save_notes_index(notes_index)
+    return jsonify({"success": True})
 
+
+@app.route("/api/notes/<note_id>/share", methods=["POST"])
+@login_required
+def api_share_note(note_id):
+    notes_index = load_notes_index()
+    note = next((n for n in notes_index if n["id"] == note_id), None)
+    if not note:
+        return jsonify({"error": "笔记不存在"}), 404
+    token = secrets.token_urlsafe(16)
+    shares = load_shares()
+    shares[token] = {"type": "note", "note_id": note_id, "title": note["title"], "created": datetime.now().isoformat()}
+    save_shares(shares)
+    return jsonify({"success": True, "token": token, "url": f"/s/{token}"})
+
+
+@app.route("/api/notes/<note_id>/download")
+@login_required
+def api_download_note(note_id):
+    note_file = NOTES_DIR / f"{note_id}.md"
+    if not note_file.exists():
+        abort(404)
+    notes_index = load_notes_index()
+    note = next((n for n in notes_index if n["id"] == note_id), None)
+    title = note["title"] if note else note_id
+    return send_file(note_file, as_attachment=True, download_name=f"{title}.md")
+
+
+# ============================================================================
+# 路由 - 系统API
+# ============================================================================
 
 @app.route("/api/system")
 @login_required
@@ -436,7 +546,6 @@ def api_system():
     disk = psutil.disk_usage("/")
     boot_time = datetime.fromtimestamp(psutil.boot_time())
     uptime = datetime.now() - boot_time
-    
     return jsonify({
         "cpu_percent": cpu,
         "memory_percent": mem.percent,
@@ -482,38 +591,105 @@ def api_data_export():
 
 
 # ============================================================================
-# 数据操作
+# 路由 - 分享页面
 # ============================================================================
 
-def load_bookmarks():
-    if BOOKMARKS_FILE.exists():
-        return json.loads(BOOKMARKS_FILE.read_text(encoding="utf-8"))
-    return DEFAULT_BOOKMARKS
-
-
-def save_bookmarks(bookmarks):
-    BOOKMARKS_FILE.write_text(json.dumps(bookmarks, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def load_notes_index():
-    if NOTES_INDEX.exists():
-        return json.loads(NOTES_INDEX.read_text(encoding="utf-8"))
-    return []
-
-
-def save_notes_index(notes):
-    NOTES_INDEX.write_text(json.dumps(notes, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-DEFAULT_BOOKMARKS = [
-    {"id": "github", "title": "GitHub", "url": "https://github.com", "icon": "🐙", "category": "开发"},
-    {"id": "google", "title": "Google", "url": "https://google.com", "icon": "🔍", "category": "搜索"},
-    {"id": "youtube", "title": "YouTube", "url": "https://youtube.com", "icon": "📺", "category": "娱乐"},
-]
+@app.route("/s/<token>")
+def shared_file(token):
+    shares = load_shares()
+    share = shares.get(token)
+    if not share:
+        abort(404)
+    if share["type"] == "file":
+        file_path = FILES_DIR / share["path"]
+        if not file_path.exists():
+            abort(404)
+        return send_file(file_path, as_attachment=True)
+    elif share["type"] == "note":
+        note_file = NOTES_DIR / f"{share['note_id']}.md"
+        if not note_file.exists():
+            abort(404)
+        content = note_file.read_text(encoding="utf-8")
+        title = share.get("title", "笔记")
+        return render_template_string(SHARED_NOTE_HTML, content=content, title=title)
+    abort(404)
 
 
 # ============================================================================
-# HTML 模板
+# HTML模板 - 通用CSS
+# ============================================================================
+
+NAV_CSS = '''
+nav {
+    background: rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(20px);
+}
+nav .logo { font-size: 18px; font-weight: bold; color: #fff; }
+nav .links { display: flex; gap: 8px; align-items: center; }
+nav .links a {
+    color: rgba(255,255,255,0.6);
+    text-decoration: none;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+nav .links a:hover { color: #fff; background: rgba(255,255,255,0.1); }
+nav .links a.active { color: #e94560; background: rgba(233,69,96,0.1); }
+'''
+
+RESPONSIVE_CSS = '''
+@media (max-width: 768px) {
+    nav { flex-direction: column; gap: 10px; padding: 10px 15px; }
+    nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
+    nav .links a { padding: 5px 10px; font-size: 12px; }
+    .container { padding: 15px; }
+    .grid { grid-template-columns: 1fr !important; }
+    .quick-links { grid-template-columns: repeat(2, 1fr) !important; }
+}
+'''
+
+WATERMARK_CSS = '''
+.watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
+.watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
+'''
+
+WATERMARK_JS = '''
+var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+'''
+
+
+def nav_html(active=""):
+    links = [
+        ("/", "首页", "home"),
+        ("/startpage", "启动页", "startpage"),
+        ("/files", "文件", "files"),
+        ("/notes", "笔记", "notes"),
+        ("/change-password", "密码", "password"),
+        ("/admin/users", "用户", "users"),
+        ("/logout", "退出", "logout"),
+    ]
+    html = '<nav><div class="logo">Private Hub</div><div class="links">'
+    for url, name, key in links:
+        if key == "users" and not is_admin():
+            continue
+        cls = ' class="active"' if key == active else ''
+        html += f'<a href="{url}"{cls}>{name}</a>'
+    html += '</div></nav>'
+    return html
+
+
+# ============================================================================
+# HTML模板 - 登录页
 # ============================================================================
 
 LOGIN_HTML = '''<!DOCTYPE html>
@@ -521,366 +697,282 @@ LOGIN_HTML = '''<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - 私密中心</title>
+    <title>登录</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
+        body {
             min-height: 100vh; display: flex; align-items: center; justify-content: center;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            font-family: 'Microsoft YaHei', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         }
         .login-box {
-            background: rgba(255,255,255,0.1); backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.2); border-radius: 20px;
-            padding: 40px; width: 380px; text-align: center;
+            background: rgba(255,255,255,0.08); backdrop-filter: blur(30px);
+            border: 1px solid rgba(255,255,255,0.12); border-radius: 20px;
+            padding: 40px; width: 360px; text-align: center;
         }
-        .login-box h1 { color: #fff; margin-bottom: 10px; font-size: 28px; }
-        .login-box p { color: rgba(255,255,255,0.6); margin-bottom: 30px; }
-        .input-group { margin-bottom: 20px; text-align: left; }
-        .input-group label { color: rgba(255,255,255,0.8); font-size: 14px; display: block; margin-bottom: 8px; }
+        .login-box h1 { font-size: 28px; margin-bottom: 8px; }
+        .login-box p { color: rgba(255,255,255,0.5); margin-bottom: 30px; font-size: 14px; }
+        .input-group { margin-bottom: 16px; text-align: left; }
+        .input-group label { color: rgba(255,255,255,0.6); font-size: 12px; display: block; margin-bottom: 6px; }
         .input-group input {
-            width: 100%; padding: 14px 18px; border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 10px; background: rgba(255,255,255,0.1); color: #fff;
-            font-size: 16px; outline: none; transition: all 0.3s;
+            width: 100%; padding: 12px 16px; border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 10px; background: rgba(255,255,255,0.08); color: #fff;
+            font-size: 14px; outline: none; transition: all 0.2s;
         }
-        .input-group input:focus { border-color: #e94560; background: rgba(255,255,255,0.15); }
+        .input-group input:focus { border-color: #e94560; background: rgba(255,255,255,0.12); }
         .btn {
-            width: 100%; padding: 14px; border: none; border-radius: 10px;
+            width: 100%; padding: 12px; border: none; border-radius: 10px; margin-top: 8px;
             background: linear-gradient(135deg, #e94560, #c23152); color: #fff;
-            font-size: 16px; cursor: pointer; transition: transform 0.2s;
+            font-size: 14px; cursor: pointer; transition: all 0.2s;
         }
-        .btn:hover { transform: translateY(-2px); }
-        .error { color: #ff6b6b; margin-bottom: 15px; font-size: 14px; }
-        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
-        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
-        @media (max-width: 480px) {
-            .login-box { width: 90%; padding: 25px; }
-        }
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(233,69,96,0.3); }
+        .error { color: #ff6b6b; font-size: 13px; margin-bottom: 12px; }
     </style>
 </head>
 <body>
     <div class="login-box">
-        <h1>🔐</h1>
+        <h1>Private Hub</h1>
         <p>私密中心</p>
         {% if error %}<div class="error">{{ error }}</div>{% endif %}
         <form method="POST">
-            <div class="input-group">
-                <label>用户名</label>
-                <input type="text" name="username" placeholder="请输入用户名" autofocus>
-            </div>
-            <div class="input-group">
-                <label>密码</label>
-                <input type="password" name="password" placeholder="请输入密码">
-            </div>
+            <div class="input-group"><label>用户名</label><input type="text" name="username" placeholder="请输入用户名" autofocus></div>
+            <div class="input-group"><label>密码</label><input type="password" name="password" placeholder="请输入密码"></div>
             <button type="submit" class="btn">登录</button>
         </form>
     </div>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-    </script>
 </body>
 </html>'''
 
 
-DASHBOARD_HTML = '''<!DOCTYPE html>
+# ============================================================================
+# HTML模板 - 首页（合并仪表盘+数据统计）
+# ============================================================================
+
+HOME_HTML = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>私密中心</title>
+    <title>首页 - Private Hub</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            min-height: 100vh; background: #0f0f1a;
-            font-family: 'Microsoft YaHei', sans-serif; color: #fff;
-        }
-        nav {
-            background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1);
-            padding: 15px 30px; display: flex; justify-content: space-between; align-items: center;
-        }
-        nav .logo { font-size: 20px; font-weight: bold; }
-        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; transition: color 0.2s; }
-        nav .links a:hover { color: #e94560; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 30px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+        ''' + NAV_CSS + '''
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        .header { text-align: center; margin-bottom: 30px; }
+        #time { font-size: 48px; font-weight: 300; margin: 10px 0; }
+        #date { color: rgba(255,255,255,0.4); font-size: 14px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px; }
         .card {
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 16px; padding: 25px; transition: transform 0.2s, border-color 0.2s;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px; padding: 20px; transition: all 0.2s;
         }
-        .card:hover { transform: translateY(-3px); border-color: rgba(233,69,96,0.5); }
-        .card h3 { color: #e94560; margin-bottom: 15px; font-size: 16px; }
-        .stat { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .stat:last-child { border: none; }
-        .stat .label { color: rgba(255,255,255,0.6); }
-        .stat .value { font-weight: bold; }
-        .progress-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; margin-top: 8px; overflow: hidden; }
-        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
-        .progress-fill.green { background: linear-gradient(90deg, #00b894, #55efc4); }
-        .progress-fill.yellow { background: linear-gradient(90deg, #fdcb6e, #f39c12); }
-        .progress-fill.red { background: linear-gradient(90deg, #e94560, #ff6b6b); }
-        .quick-links { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+        .card:hover { border-color: rgba(233,69,96,0.3); transform: translateY(-2px); }
+        .card-title { color: rgba(255,255,255,0.5); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+        .card-value { font-size: 28px; font-weight: 600; }
+        .card-sub { color: rgba(255,255,255,0.4); font-size: 12px; margin-top: 4px; }
+        .progress-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 12px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+        .green { background: linear-gradient(90deg, #00b894, #55efc4); }
+        .yellow { background: linear-gradient(90deg, #fdcb6e, #f39c12); }
+        .red { background: linear-gradient(90deg, #e94560, #ff6b6b); }
+        .chart-card { grid-column: span 2; }
+        .quick-section { margin-top: 24px; }
+        .section-title { font-size: 14px; color: rgba(255,255,255,0.5); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 1px; }
+        .quick-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
         .quick-link {
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 12px; padding: 20px; text-align: center; text-decoration: none; color: #fff;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 16px; text-align: center; text-decoration: none; color: #fff;
             transition: all 0.2s;
         }
-        .quick-link:hover { background: rgba(233,69,96,0.2); border-color: #e94560; }
-        .quick-link .icon { font-size: 32px; margin-bottom: 10px; }
-        .quick-link .name { font-size: 14px; color: rgba(255,255,255,0.8); }
-        .section-title { font-size: 18px; margin-bottom: 20px; color: rgba(255,255,255,0.9); }
-        #time { font-size: 48px; font-weight: 300; text-align: center; margin: 20px 0; }
-        #date { text-align: center; color: rgba(255,255,255,0.5); }
-        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
-        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
-        @media (max-width: 768px) {
-            nav { flex-direction: column; gap: 10px; padding: 10px 15px; }
-            nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
-            nav .links a { margin: 0; padding: 5px 10px; font-size: 12px; }
-            .container { padding: 15px; }
-            .grid { grid-template-columns: 1fr !important; }
-            .quick-links { grid-template-columns: repeat(2, 1fr) !important; }
-            #time { font-size: 32px; }
-        }
+        .quick-link:hover { background: rgba(233,69,96,0.15); border-color: rgba(233,69,96,0.3); transform: translateY(-2px); }
+        .quick-link .icon { font-size: 24px; margin-bottom: 8px; display: block; }
+        .quick-link .name { font-size: 12px; color: rgba(255,255,255,0.6); }
+        ''' + RESPONSIVE_CSS + '''
+        @media (max-width: 768px) { .chart-card { grid-column: span 1; } }
+        ''' + WATERMARK_CSS + '''
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">🏠 私密中心</div>
-        <div class="links">
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
-            <a href="/startpage">启动页</a>
-            <a href="/files">文件</a>
-            <a href="/notes">笔记</a>
-            <a href="/admin/users">用户管理</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
+    ''' + nav_html("home") + '''
     <div class="container">
-        <div id="time"></div>
-        <div id="date"></div>
-        
-        <div class="grid" style="margin-top: 30px;">
+        <div class="header">
+            <div id="time"></div>
+            <div id="date"></div>
+        </div>
+        <div class="grid">
             <div class="card">
-                <h3>💻 CPU</h3>
-                <div id="cpu-info">加载中...</div>
+                <div class="card-title">CPU</div>
+                <div class="card-value" id="cpu-val">--</div>
+                <div class="progress-bar"><div class="progress-fill green" id="cpu-bar"></div></div>
             </div>
             <div class="card">
-                <h3>🧠 内存</h3>
-                <div id="mem-info">加载中...</div>
+                <div class="card-title">内存</div>
+                <div class="card-value" id="mem-val">--</div>
+                <div class="progress-bar"><div class="progress-fill green" id="mem-bar"></div></div>
             </div>
             <div class="card">
-                <h3>💾 磁盘</h3>
-                <div id="disk-info">加载中...</div>
+                <div class="card-title">磁盘</div>
+                <div class="card-value" id="disk-val">--</div>
+                <div class="progress-bar"><div class="progress-fill green" id="disk-bar"></div></div>
             </div>
             <div class="card">
-                <h3>ℹ️ 系统</h3>
-                <div id="sys-info">加载中...</div>
+                <div class="card-title">运行时间</div>
+                <div class="card-value" id="uptime-val" style="font-size:20px">--</div>
+            </div>
+            <div class="card">
+                <div class="card-title">书签</div>
+                <div class="card-value" id="bm-val">--</div>
+            </div>
+            <div class="card">
+                <div class="card-title">笔记</div>
+                <div class="card-value" id="note-val">--</div>
+            </div>
+            <div class="card">
+                <div class="card-title">文件</div>
+                <div class="card-value" id="file-val">--</div>
+            </div>
+            <div class="card chart-card">
+                <div class="card-title">系统监控</div>
+                <canvas id="usageChart" height="150"></canvas>
             </div>
         </div>
-        
-        <h2 class="section-title" style="margin-top: 30px;">系统监控</h2>
-        <div class="card">
-            <canvas id="usageChart" height="100"></canvas>
-        </div>
-        
-        <h2 class="section-title">快捷访问</h2>
-        <div class="quick-links">
-            <a href="/startpage" class="quick-link"><div class="icon">🚀</div><div class="name">启动页</div></a>
-            <a href="/files" class="quick-link"><div class="icon">📁</div><div class="name">文件管理</div></a>
-            <a href="/notes" class="quick-link"><div class="icon">📝</div><div class="name">笔记</div></a>
-            <a href="https://github.com" class="quick-link" target="_blank"><div class="icon">🐙</div><div class="name">GitHub</div></a>
+        <div class="quick-section">
+            <div class="section-title">快捷访问</div>
+            <div class="quick-links">
+                <a href="/startpage" class="quick-link"><span class="icon">🚀</span><span class="name">启动页</span></a>
+                <a href="/files" class="quick-link"><span class="icon">📁</span><span class="name">文件</span></a>
+                <a href="/notes" class="quick-link"><span class="icon">📝</span><span class="name">笔记</span></a>
+                <a href="/change-password" class="quick-link"><span class="icon">🔑</span><span class="name">密码</span></a>
+                <a href="/admin/users" class="quick-link"><span class="icon">👥</span><span class="name">用户</span></a>
+                <a href="#" class="quick-link" onclick="exportData()"><span class="icon">📥</span><span class="name">导出</span></a>
+            </div>
         </div>
     </div>
-    
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
-        var cpuHistory = [];
-        var memHistory = [];
-        var diskHistory = [];
-        var timeLabels = [];
-        var maxPoints = 20;
-        
+        function updateTime() {
+            var now = new Date();
+            document.getElementById('time').textContent = now.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+            document.getElementById('date').textContent = now.toLocaleDateString('zh-CN', {year:'numeric', month:'long', day:'numeric', weekday:'long'});
+        }
+        updateTime(); setInterval(updateTime, 1000);
+        function getColor(p) { return p > 80 ? 'red' : p > 60 ? 'yellow' : 'green'; }
+        function setBar(id, pct) { var el = document.getElementById(id); el.style.width = pct + '%'; el.className = 'progress-fill ' + getColor(pct); }
+        var cpuH=[], memH=[], diskH=[], labels=[];
         var ctx = document.getElementById('usageChart');
-        var usageChart = new Chart(ctx, {
+        var chart = new Chart(ctx, {
             type: 'line',
-            data: {
-                labels: timeLabels,
-                datasets: [
-                    { label: 'CPU', data: cpuHistory, borderColor: '#e94560', backgroundColor: 'rgba(233,69,96,0.1)', fill: true, tension: 0.3 },
-                    { label: '内存', data: memHistory, borderColor: '#00b894', backgroundColor: 'rgba(0,184,148,0.1)', fill: true, tension: 0.3 },
-                    { label: '磁盘', data: diskHistory, borderColor: '#fdcb6e', backgroundColor: 'rgba(253,203,110,0.1)', fill: true, tension: 0.3 }
-                ]
-            },
-            options: {
-                responsive: true,
-                scales: { y: { beginAtZero: true, max: 100, ticks: { color: 'rgba(255,255,255,0.5)' }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { ticks: { color: 'rgba(255,255,255,0.5)' }, grid: { color: 'rgba(255,255,255,0.05)' } } },
-                plugins: { legend: { labels: { color: 'rgba(255,255,255,0.7)' } } }
+            data: { labels: labels, datasets: [
+                { label: 'CPU', data: cpuH, borderColor: '#e94560', backgroundColor: 'rgba(233,69,96,0.1)', fill: true, tension: 0.3, pointRadius: 0 },
+                { label: '内存', data: memH, borderColor: '#00b894', backgroundColor: 'rgba(0,184,148,0.1)', fill: true, tension: 0.3, pointRadius: 0 },
+                { label: '磁盘', data: diskH, borderColor: '#fdcb6e', backgroundColor: 'rgba(253,203,110,0.1)', fill: true, tension: 0.3, pointRadius: 0 }
+            ]},
+            options: { responsive: true, animation: { duration: 300 },
+                scales: { y: { beginAtZero: true, max: 100, ticks: { color: 'rgba(255,255,255,0.3)' }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { ticks: { display: false }, grid: { display: false } } },
+                plugins: { legend: { labels: { color: 'rgba(255,255,255,0.5)', usePointStyle: true, pointStyle: 'circle' } } }
             }
         });
-
-        function updateTime() {
-            const now = new Date();
-            document.getElementById('time').textContent = now.toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'});
-            document.getElementById('date').textContent = now.toLocaleDateString('zh-CN', {year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'});
-        }
-        updateTime();
-        setInterval(updateTime, 1000);
-        
-        function getProgressClass(percent) {
-            if (percent > 80) return 'red';
-            if (percent > 60) return 'yellow';
-            return 'green';
-        }
-        
-        async function loadSystemInfo() {
+        async function loadSystem() {
             try {
-                const res = await fetch('/api/system');
-                const data = await res.json();
-                
-                document.getElementById('cpu-info').innerHTML = `
-                    <div class="stat"><span class="label">使用率</span><span class="value">${data.cpu_percent}%</span></div>
-                    <div class="progress-bar"><div class="progress-fill ${getProgressClass(data.cpu_percent)}" style="width:${data.cpu_percent}%"></div></div>
-                `;
-                
-                document.getElementById('mem-info').innerHTML = `
-                    <div class="stat"><span class="label">已用</span><span class="value">${data.memory_used_gb}GB / ${data.memory_total_gb}GB</span></div>
-                    <div class="progress-bar"><div class="progress-fill ${getProgressClass(data.memory_percent)}" style="width:${data.memory_percent}%"></div></div>
-                `;
-                
-                document.getElementById('disk-info').innerHTML = `
-                    <div class="stat"><span class="label">已用</span><span class="value">${data.disk_used_gb}GB / ${data.disk_total_gb}GB</span></div>
-                    <div class="progress-bar"><div class="progress-fill ${getProgressClass(data.disk_percent)}" style="width:${data.disk_percent}%"></div></div>
-                `;
-                
-                document.getElementById('sys-info').innerHTML = `
-                    <div class="stat"><span class="label">系统</span><span class="value">${data.platform}</span></div>
-                    <div class="stat"><span class="label">主机</span><span class="value">${data.hostname}</span></div>
-                    <div class="stat"><span class="label">运行</span><span class="value">${data.uptime}</span></div>
-                `;
-                
-                var now = new Date();
-                var timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0') + ':' + now.getSeconds().toString().padStart(2,'0');
-                timeLabels.push(timeStr);
-                cpuHistory.push(data.cpu_percent);
-                memHistory.push(data.memory_percent);
-                diskHistory.push(data.disk_percent);
-                if (timeLabels.length > maxPoints) { timeLabels.shift(); cpuHistory.shift(); memHistory.shift(); diskHistory.shift(); }
-                usageChart.update();
-            } catch(e) {
-                console.error('加载系统信息失败:', e);
-            }
+                var r = await fetch('/api/system'); var d = await r.json();
+                document.getElementById('cpu-val').textContent = d.cpu_percent + '%';
+                document.getElementById('mem-val').textContent = d.memory_percent + '%';
+                document.getElementById('disk-val').textContent = d.disk_percent + '%';
+                document.getElementById('uptime-val').textContent = d.uptime;
+                setBar('cpu-bar', d.cpu_percent); setBar('mem-bar', d.memory_percent); setBar('disk-bar', d.disk_percent);
+                var t = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+                labels.push(t); cpuH.push(d.cpu_percent); memH.push(d.memory_percent); diskH.push(d.disk_percent);
+                if (labels.length > 30) { labels.shift(); cpuH.shift(); memH.shift(); diskH.shift(); }
+                chart.update();
+            } catch(e) {}
         }
-        
-        loadSystemInfo();
-        setInterval(loadSystemInfo, 5000);
+        async function loadStats() {
+            try {
+                var r = await fetch('/api/data/stats'); var d = await r.json();
+                document.getElementById('bm-val').textContent = d.bookmarks;
+                document.getElementById('note-val').textContent = d.notes;
+                document.getElementById('file-val').textContent = d.files;
+            } catch(e) {}
+        }
+        function exportData() { window.open('/api/data/export', '_blank'); }
+        loadSystem(); loadStats();
+        setInterval(loadSystem, 3000); setInterval(loadStats, 30000);
     </script>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-    </script>
+    <script>''' + WATERMARK_JS + '''</script>
 </body>
 </html>'''
 
+
+# ============================================================================
+# HTML模板 - 启动页
+# ============================================================================
 
 STARTPAGE_HTML = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>启动页 - 私密中心</title>
+    <title>启动页 - Private Hub</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            min-height: 100vh; display: flex; flex-direction: column;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            font-family: 'Microsoft YaHei', sans-serif; color: #fff;
-        }
-        nav {
-            background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1);
-            padding: 15px 30px; display: flex; justify-content: space-between; align-items: center;
-        }
-        nav .logo { font-size: 20px; font-weight: bold; }
-        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
-        nav .links a:hover { color: #e94560; }
-        .main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; }
-        .search-box { width: 100%; max-width: 600px; margin-bottom: 50px; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+        ''' + NAV_CSS + '''
+        .main { max-width: 800px; margin: 0 auto; padding: 60px 24px; text-align: center; }
+        .search-box { margin-bottom: 40px; }
         .search-box input {
-            width: 100%; padding: 18px 24px; border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 15px; background: rgba(255,255,255,0.1); color: #fff;
-            font-size: 18px; outline: none; backdrop-filter: blur(10px);
+            width: 100%; padding: 16px 24px; border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 14px; background: rgba(255,255,255,0.08); color: #fff;
+            font-size: 16px; outline: none; transition: all 0.2s;
         }
-        .search-box input:focus { border-color: #e94560; }
-        .bookmarks { width: 100%; max-width: 900px; }
+        .search-box input:focus { border-color: #e94560; background: rgba(255,255,255,0.12); }
+        .bookmarks { text-align: left; }
         .category { margin-bottom: 30px; }
-        .category h3 { color: rgba(255,255,255,0.5); font-size: 14px; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 2px; }
-        .bookmark-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px; }
+        .category-title { color: rgba(255,255,255,0.4); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+        .bookmark-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px; }
         .bookmark {
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 12px; padding: 20px 15px; text-align: center; text-decoration: none; color: #fff;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 16px 12px; text-align: center; text-decoration: none; color: #fff;
             transition: all 0.2s; position: relative;
         }
-        .bookmark:hover { background: rgba(233,69,96,0.2); border-color: #e94560; transform: translateY(-3px); }
-        .bookmark .icon { font-size: 32px; margin-bottom: 10px; display: block; }
-        .bookmark .title { font-size: 13px; color: rgba(255,255,255,0.8); }
+        .bookmark:hover { background: rgba(233,69,96,0.15); border-color: rgba(233,69,96,0.3); transform: translateY(-2px); }
+        .bookmark .icon { font-size: 28px; margin-bottom: 8px; display: block; }
+        .bookmark .title { font-size: 11px; color: rgba(255,255,255,0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .bookmark .delete {
-            position: absolute; top: 5px; right: 5px; width: 20px; height: 20px;
+            position: absolute; top: 4px; right: 4px; width: 18px; height: 18px;
             background: rgba(233,69,96,0.8); border: none; border-radius: 50%;
-            color: #fff; cursor: pointer; font-size: 12px; display: none;
+            color: #fff; cursor: pointer; font-size: 10px; display: none; align-items: center; justify-content: center;
         }
-        .bookmark:hover .delete { display: block; }
+        .bookmark:hover .delete { display: flex; }
         .add-bookmark {
-            background: rgba(255,255,255,0.05); border: 2px dashed rgba(255,255,255,0.2);
-            border-radius: 12px; padding: 20px 15px; text-align: center; cursor: pointer;
-            transition: all 0.2s;
+            background: rgba(255,255,255,0.03); border: 2px dashed rgba(255,255,255,0.15);
+            border-radius: 12px; padding: 16px 12px; text-align: center; cursor: pointer; transition: all 0.2s;
         }
-        .add-bookmark:hover { border-color: #e94560; background: rgba(233,69,96,0.1); }
-        .modal {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;
-        }
+        .add-bookmark:hover { border-color: #e94560; background: rgba(233,69,96,0.08); }
+        .add-bookmark .icon { font-size: 28px; margin-bottom: 8px; display: block; color: rgba(255,255,255,0.3); }
+        .add-bookmark .title { font-size: 11px; color: rgba(255,255,255,0.3); }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
         .modal.active { display: flex; }
-        .modal-content {
-            background: #1a1a2e; border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 16px; padding: 30px; width: 400px;
-        }
-        .modal-content h3 { margin-bottom: 20px; }
-        .modal-content input, .modal-content select {
-            width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 8px; background: rgba(255,255,255,0.1); color: #fff; font-size: 14px;
-        }
-        .modal-content .btn-row { display: flex; gap: 10px; }
-        .modal-content button { flex: 1; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .modal-box { background: #1a1a2e; border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 24px; width: 360px; }
+        .modal-box h3 { margin-bottom: 16px; font-size: 16px; }
+        .modal-box input { width: 100%; padding: 10px 14px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.08); color: #fff; font-size: 13px; outline: none; }
+        .btn-row { display: flex; gap: 8px; }
+        .btn-row button { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; }
         .btn-primary { background: #e94560; color: #fff; }
         .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
-        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
-        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
+        ''' + RESPONSIVE_CSS + WATERMARK_CSS + '''
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">🚀 启动页</div>
-        <div class="links">
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
-            <a href="/startpage">启动页</a>
-            <a href="/files">文件</a>
-            <a href="/notes">笔记</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
+    ''' + nav_html("startpage") + '''
     <div class="main">
         <div class="search-box">
-            <input type="text" id="searchInput" placeholder="搜索或输入网址..." onkeydown="if(event.key==='Enter') window.open('https://www.google.com/search?q='+this.value)">
+            <input type="text" id="searchInput" placeholder="搜索或输入网址..." onkeydown="if(event.key==='Enter'){var v=this.value;if(v.startsWith('http'))window.open(v);else window.open('https://www.google.com/search?q='+v)}">
         </div>
         <div class="bookmarks" id="bookmarksContainer"></div>
     </div>
-    
     <div class="modal" id="addModal">
-        <div class="modal-content">
+        <div class="modal-box">
             <h3>添加书签</h3>
             <input type="text" id="bmTitle" placeholder="标题">
             <input type="text" id="bmUrl" placeholder="网址">
@@ -892,167 +984,120 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
             </div>
         </div>
     </div>
-    
     <script>
-        let bookmarks = {{ bookmarks | tojson }};
-        
+        var bookmarks = {{ bookmarks | tojson }};
         function render() {
-            const container = document.getElementById('bookmarksContainer');
-            const categories = {};
-            bookmarks.forEach(bm => {
-                const cat = bm.category || '未分类';
-                if (!categories[cat]) categories[cat] = [];
-                categories[cat].push(bm);
-            });
-            
-            let html = '';
-            for (const [cat, items] of Object.entries(categories)) {
-                html += `<div class="category"><h3>${cat}</h3><div class="bookmark-grid">`;
-                items.forEach(bm => {
-                    html += `
-                        <a href="${bm.url}" class="bookmark" target="_blank">
-                            <button class="delete" onclick="event.preventDefault();deleteBookmark('${bm.id}')">×</button>
-                            <span class="icon">${bm.icon || '🔗'}</span>
-                            <span class="title">${bm.title}</span>
-                        </a>`;
+            var c = document.getElementById('bookmarksContainer');
+            var cats = {};
+            bookmarks.forEach(function(bm) { var cat = bm.category || '未分类'; if (!cats[cat]) cats[cat] = []; cats[cat].push(bm); });
+            var html = '';
+            for (var cat in cats) {
+                html += '<div class="category"><div class="category-title">' + cat + '</div><div class="bookmark-grid">';
+                cats[cat].forEach(function(bm) {
+                    html += '<a href="' + bm.url + '" class="bookmark" target="_blank"><button class="delete" onclick="event.preventDefault();deleteBookmark(\\'' + bm.id + '\\')">×</button><span class="icon">' + (bm.icon||'🔗') + '</span><span class="title">' + bm.title + '</span></a>';
                 });
-                html += `<div class="add-bookmark" onclick="openModal()"><span class="icon">+</span><span class="title">添加</span></div>`;
-                html += `</div></div>`;
+                html += '<div class="add-bookmark" onclick="openModal()"><span class="icon">+</span><span class="title">添加</span></div></div></div>';
             }
-            container.innerHTML = html;
+            c.innerHTML = html;
         }
-        
         function openModal() { document.getElementById('addModal').classList.add('active'); }
         function closeModal() { document.getElementById('addModal').classList.remove('active'); }
-        
         async function saveBookmark() {
-            const data = {
-                title: document.getElementById('bmTitle').value,
-                url: document.getElementById('bmUrl').value,
-                icon: document.getElementById('bmIcon').value || '🔗',
-                category: document.getElementById('bmCategory').value || '未分类'
-            };
-            await fetch('/api/bookmarks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
+            var data = { title: document.getElementById('bmTitle').value, url: document.getElementById('bmUrl').value, icon: document.getElementById('bmIcon').value||'🔗', category: document.getElementById('bmCategory').value||'未分类' };
+            await fetch('/api/bookmarks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
             location.reload();
         }
-        
-        async function deleteBookmark(id) {
-            await fetch(`/api/bookmarks/${id}`, {method: 'DELETE'});
-            location.reload();
-        }
-        
+        async function deleteBookmark(id) { await fetch('/api/bookmarks/'+id, {method:'DELETE'}); location.reload(); }
         render();
     </script>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-    </script>
+    <script>''' + WATERMARK_JS + '''</script>
 </body>
 </html>'''
 
+
+# ============================================================================
+# HTML模板 - 文件管理
+# ============================================================================
 
 FILES_HTML = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>文件管理 - 私密中心</title>
+    <title>文件 - Private Hub</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
-        nav {
-            background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1);
-            padding: 15px 30px; display: flex; justify-content: space-between; align-items: center;
-        }
-        nav .logo { font-size: 20px; font-weight: bold; }
-        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
-        nav .links a:hover { color: #e94560; }
-        .container { max-width: 1000px; margin: 0 auto; padding: 30px; }
-        .breadcrumb { margin-bottom: 20px; color: rgba(255,255,255,0.5); }
+        body { min-height: 100vh; background: #0f0f1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+        ''' + NAV_CSS + '''
+        .container { max-width: 1000px; margin: 0 auto; padding: 24px; }
+        .breadcrumb { margin-bottom: 16px; font-size: 13px; }
         .breadcrumb a { color: #e94560; text-decoration: none; }
-        .file-list { background: rgba(255,255,255,0.05); border-radius: 12px; overflow: hidden; }
+        .upload-area {
+            border: 2px dashed rgba(255,255,255,0.15); border-radius: 12px;
+            padding: 30px; text-align: center; margin-bottom: 20px; cursor: pointer; transition: all 0.2s;
+        }
+        .upload-area:hover { border-color: #e94560; background: rgba(233,69,96,0.08); }
+        .upload-area input { display: none; }
+        .upload-area p { color: rgba(255,255,255,0.5); font-size: 14px; }
+        .file-list { background: rgba(255,255,255,0.03); border-radius: 12px; overflow: hidden; }
         .file-item {
-            display: flex; align-items: center; padding: 15px 20px;
+            display: flex; align-items: center; padding: 12px 16px;
             border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;
         }
         .file-item:hover { background: rgba(255,255,255,0.05); }
         .file-item:last-child { border: none; }
-        .file-icon { font-size: 24px; margin-right: 15px; width: 35px; text-align: center; }
-        .file-name { flex: 1; }
+        .file-icon { font-size: 20px; margin-right: 12px; width: 28px; text-align: center; }
+        .file-name { flex: 1; font-size: 14px; }
         .file-name a { color: #fff; text-decoration: none; }
         .file-name a:hover { color: #e94560; }
-        .file-meta { color: rgba(255,255,255,0.4); font-size: 13px; }
-        .upload-area {
-            border: 2px dashed rgba(255,255,255,0.2); border-radius: 12px;
-            padding: 40px; text-align: center; margin-bottom: 20px; cursor: pointer;
-            transition: all 0.2s;
+        .file-meta { color: rgba(255,255,255,0.3); font-size: 12px; margin-right: 12px; }
+        .file-actions { display: flex; gap: 6px; }
+        .action-btn {
+            padding: 6px 10px; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+            background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.7); cursor: pointer;
+            font-size: 12px; text-decoration: none; transition: all 0.2s;
         }
-        .upload-area:hover { border-color: #e94560; background: rgba(233,69,96,0.1); }
-        .upload-area input { display: none; }
-        .download-btn {
-            padding: 8px 12px; background: rgba(233,69,96,0.2); border: 1px solid rgba(233,69,96,0.5);
-            border-radius: 8px; text-decoration: none; font-size: 14px; transition: all 0.2s;
-        }
-        .download-btn:hover { background: #e94560; }
-        .preview-btn {
-            padding: 8px 12px; background: rgba(0,184,148,0.2); border: 1px solid rgba(0,184,148,0.5);
-            border-radius: 8px; text-decoration: none; font-size: 14px; transition: all 0.2s; margin-right: 5px;
-        }
-        .preview-btn:hover { background: #00b894; }
-        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
-        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
-        @media (max-width: 768px) {
-            nav { flex-direction: column; gap: 10px; padding: 10px 15px; }
-            nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
-            nav .links a { margin: 0; padding: 5px 10px; font-size: 12px; }
-            .container { padding: 15px; }
-            .file-item { flex-wrap: wrap; gap: 8px; }
-            .file-meta { width: 100%; }
-        }
+        .action-btn:hover { background: rgba(233,69,96,0.2); border-color: rgba(233,69,96,0.4); color: #fff; }
+        .action-btn.danger:hover { background: rgba(233,69,96,0.3); }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-box { background: #1a1a2e; border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 24px; width: 360px; }
+        .modal-box h3 { margin-bottom: 16px; font-size: 16px; }
+        .modal-box input { width: 100%; padding: 10px 14px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.08); color: #fff; font-size: 13px; outline: none; }
+        .btn-row { display: flex; gap: 8px; }
+        .btn-row button { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .btn-primary { background: #e94560; color: #fff; }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
+        .share-url { padding: 10px; background: rgba(0,184,148,0.1); border: 1px solid rgba(0,184,148,0.3); border-radius: 8px; word-break: break-all; font-size: 12px; margin-top: 10px; }
+        ''' + RESPONSIVE_CSS + WATERMARK_CSS + '''
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">📁 文件管理</div>
-        <div class="links">
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
-            <a href="/startpage">启动页</a>
-            <a href="/files">文件</a>
-            <a href="/notes">笔记</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
+    ''' + nav_html("files") + '''
     <div class="container">
-        <div class="breadcrumb">
-            <a href="/files">根目录</a>
-            {% if current_path %} / {{ current_path }}{% endif %}
-        </div>
-        
+        <div class="breadcrumb"><a href="/files">根目录</a>{% if current_path %} / {{ current_path }}{% endif %}</div>
         <div class="upload-area" onclick="document.getElementById('fileInput').click()">
             <input type="file" id="fileInput" onchange="uploadFile(this)">
-            <p>📁 点击或拖拽上传文件</p>
+            <p>点击或拖拽上传文件</p>
         </div>
-        
         <div class="file-list">
             {% if current_path %}
-            <div class="file-item">
-                <span class="file-icon">📂</span>
-                <div class="file-name"><a href="/files">.. 返回上级</a></div>
-            </div>
+            <div class="file-item"><span class="file-icon">📂</span><div class="file-name"><a href="/files">.. 返回上级</a></div></div>
             {% endif %}
             {% for item in items %}
             <div class="file-item">
                 <span class="file-icon">{{ '📂' if item.is_dir else '📄' }}</span>
-                <div class="file-name">
-                    <a href="/files/{{ item.path }}">{{ item.name }}</a>
+                <div class="file-name"><a href="/files/{{ item.path }}">{{ item.name }}</a></div>
+                <div class="file-meta">{{ item.modified }}{% if not item.is_dir %} | {{ "%.1f"|format(item.size / 1024) }}KB{% endif %}</div>
+                <div class="file-actions">
+                    {% if not item.is_dir %}
+                    <a href="/preview/{{ item.path }}" class="action-btn" target="_blank">预览</a>
+                    <a href="/download/{{ item.path }}" class="action-btn">下载</a>
+                    <button class="action-btn" onclick="renameFile('{{ item.path }}', '{{ item.name }}')">重命名</button>
+                    <button class="action-btn" onclick="shareFile('{{ item.path }}')">分享</button>
+                    <button class="action-btn danger" onclick="deleteFile('{{ item.path }}')">删除</button>
+                    {% endif %}
                 </div>
-                <div class="file-meta">{{ item.modified }}{% if not item.is_dir %} | {{ "%.1f"|format(item.size / 1024) }} KB{% endif %}</div>
-                {% if not item.is_dir %}
-                <a href="/preview/{{ item.path }}" class="preview-btn" title="预览" target="_blank">👁️</a>
-                <a href="/download/{{ item.path }}" class="download-btn" title="下载">⬇️</a>
-                {% endif %}
             </div>
             {% endfor %}
             {% if not items %}
@@ -1060,352 +1105,475 @@ FILES_HTML = '''<!DOCTYPE html>
             {% endif %}
         </div>
     </div>
-    
+    <div class="modal" id="renameModal">
+        <div class="modal-box">
+            <h3>重命名</h3>
+            <input type="text" id="newName" placeholder="新文件名">
+            <div class="btn-row">
+                <button class="btn-secondary" onclick="closeModal('renameModal')">取消</button>
+                <button class="btn-primary" onclick="doRename()">确定</button>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="shareModal">
+        <div class="modal-box">
+            <h3>分享链接</h3>
+            <div class="share-url" id="shareUrl">生成中...</div>
+            <div class="btn-row" style="margin-top:12px">
+                <button class="btn-primary" onclick="copyShare()">复制链接</button>
+                <button class="btn-secondary" onclick="closeModal('shareModal')">关闭</button>
+            </div>
+        </div>
+    </div>
     <script>
+        var currentPath = '';
         async function uploadFile(input) {
-            const file = input.files[0];
-            if (!file) return;
-            const formData = new FormData();
-            formData.append('file', file);
-            await fetch('/api/upload', {method: 'POST', body: formData});
+            var file = input.files[0]; if (!file) return;
+            var fd = new FormData(); fd.append('file', file);
+            await fetch('/api/upload', {method:'POST', body:fd});
             location.reload();
         }
+        async function deleteFile(path) {
+            if (!confirm('确定删除 ' + path + '？')) return;
+            await fetch('/api/delete/' + path, {method:'DELETE'});
+            location.reload();
+        }
+        function renameFile(path, name) {
+            currentPath = path;
+            document.getElementById('newName').value = name;
+            document.getElementById('renameModal').classList.add('active');
+        }
+        async function doRename() {
+            var name = document.getElementById('newName').value;
+            await fetch('/api/rename/' + currentPath, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name})});
+            closeModal('renameModal'); location.reload();
+        }
+        async function shareFile(path) {
+            document.getElementById('shareModal').classList.add('active');
+            document.getElementById('shareUrl').textContent = '生成中...';
+            var r = await fetch('/api/share/' + path, {method:'POST'});
+            var d = await r.json();
+            if (d.success) { document.getElementById('shareUrl').textContent = window.location.origin + d.url; }
+        }
+        function copyShare() {
+            var text = document.getElementById('shareUrl').textContent;
+            navigator.clipboard.writeText(text); alert('已复制');
+        }
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
     </script>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-    </script>
+    <script>''' + WATERMARK_JS + '''</script>
 </body>
 </html>'''
 
+
+# ============================================================================
+# HTML模板 - 笔记列表
+# ============================================================================
 
 NOTES_HTML = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>笔记 - 私密中心</title>
+    <title>笔记 - Private Hub</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
-        nav {
-            background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1);
-            padding: 15px 30px; display: flex; justify-content: space-between; align-items: center;
-        }
-        nav .logo { font-size: 20px; font-weight: bold; }
-        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
-        nav .links a:hover { color: #e94560; }
-        .container { max-width: 800px; margin: 0 auto; padding: 30px; }
-        .btn { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+        ''' + NAV_CSS + '''
+        .container { max-width: 900px; margin: 0 auto; padding: 24px; }
+        .toolbar { display: flex; gap: 10px; margin-bottom: 20px; }
+        .toolbar input { flex: 1; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.08); color: #fff; font-size: 13px; outline: none; }
+        .toolbar input:focus { border-color: #e94560; }
+        .btn { padding: 10px 16px; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
         .btn-primary { background: #e94560; color: #fff; }
-        .note-list { margin-top: 20px; }
+        .btn-primary:hover { background: #c23152; }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; text-decoration: none; display: inline-flex; align-items: center; }
+        .note-list { display: grid; gap: 12px; }
         .note-card {
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 12px; padding: 20px; margin-bottom: 15px; transition: all 0.2s;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 16px 20px; transition: all 0.2s;
         }
-        .note-card:hover { border-color: rgba(233,69,96,0.5); }
-        .note-card h3 { margin-bottom: 10px; }
-        .note-card h3 a { color: #fff; text-decoration: none; }
-        .note-card h3 a:hover { color: #e94560; }
-        .note-card .meta { color: rgba(255,255,255,0.4); font-size: 13px; display: flex; justify-content: space-between; }
-        .note-card .delete { background: none; border: none; color: #e94560; cursor: pointer; }
-        .modal {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;
+        .note-card:hover { border-color: rgba(233,69,96,0.3); }
+        .note-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .note-title { font-size: 16px; font-weight: 500; }
+        .note-title a { color: #fff; text-decoration: none; }
+        .note-title a:hover { color: #e94560; }
+        .note-meta { color: rgba(255,255,255,0.3); font-size: 12px; }
+        .note-actions { display: flex; gap: 6px; }
+        .action-btn {
+            padding: 6px 10px; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+            background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.7); cursor: pointer;
+            font-size: 12px; text-decoration: none; transition: all 0.2s;
         }
+        .action-btn:hover { background: rgba(233,69,96,0.2); border-color: rgba(233,69,96,0.4); color: #fff; }
+        .action-btn.danger:hover { background: rgba(233,69,96,0.3); }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
         .modal.active { display: flex; }
-        .modal-content {
-            background: #1a1a2e; border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 16px; padding: 30px; width: 600px;
-        }
-        .modal-content h3 { margin-bottom: 20px; }
-        .modal-content input, .modal-content textarea {
-            width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 8px; background: rgba(255,255,255,0.1); color: #fff; font-size: 14px;
-        }
-        .modal-content textarea { min-height: 200px; font-family: monospace; resize: vertical; }
-        .btn-row { display: flex; gap: 10px; }
-        .btn-row button { flex: 1; padding: 12px; border: none; border-radius: 8px; cursor: pointer; }
-        .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
-        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
-        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
-        @media (max-width: 768px) {
-            nav { flex-direction: column; gap: 10px; padding: 10px 15px; }
-            nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
-            nav .links a { margin: 0; padding: 5px 10px; font-size: 12px; }
-            .container { padding: 15px; }
-            .modal-content { width: 95% !important; padding: 20px; }
-        }
+        .modal-box { background: #1a1a2e; border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 24px; width: 500px; max-height: 80vh; overflow-y: auto; }
+        .modal-box h3 { margin-bottom: 16px; font-size: 16px; }
+        .modal-box input, .modal-box textarea { width: 100%; padding: 10px 14px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.08); color: #fff; font-size: 13px; outline: none; }
+        .modal-box textarea { min-height: 200px; font-family: monospace; resize: vertical; }
+        .btn-row { display: flex; gap: 8px; }
+        .btn-row button { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .share-url { padding: 10px; background: rgba(0,184,148,0.1); border: 1px solid rgba(0,184,148,0.3); border-radius: 8px; word-break: break-all; font-size: 12px; margin-top: 10px; }
+        ''' + RESPONSIVE_CSS + WATERMARK_CSS + '''
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">📝 笔记</div>
-        <div class="links">
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
-            <a href="/startpage">启动页</a>
-            <a href="/files">文件</a>
-            <a href="/notes">笔记</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
+    ''' + nav_html("notes") + '''
     <div class="container">
-        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-            <form action="/notes" method="GET" style="display: flex; gap: 10px; flex: 1;">
-                <input type="text" name="q" value="{{ query }}" placeholder="搜索笔记..." style="flex: 1; padding: 12px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.1); color: #fff; font-size: 14px;">
+        <div class="toolbar">
+            <form action="/notes" method="GET" style="display:flex;gap:10px;flex:1">
+                <input type="text" name="q" value="{{ query }}" placeholder="搜索笔记...">
                 <button type="submit" class="btn btn-primary">搜索</button>
-                {% if query %}<a href="/notes" class="btn btn-secondary" style="text-decoration:none;display:flex;align-items:center;">清除</a>{% endif %}
+                {% if query %}<a href="/notes" class="btn btn-secondary">清除</a>{% endif %}
             </form>
-            <button class="btn btn-primary" onclick="openModal()">+ 新建笔记</button>
+            <button class="btn btn-primary" onclick="openModal('createModal')">+ 新建</button>
         </div>
-        
         <div class="note-list">
             {% for note in notes %}
             <div class="note-card">
-                <h3><a href="/notes/{{ note.id }}">{{ note.title }}</a></h3>
-                <div class="meta">
-                    <span>{{ note.created }}</span>
-                    <button class="delete" onclick="deleteNote('{{ note.id }}')">删除</button>
+                <div class="note-header">
+                    <div>
+                        <div class="note-title"><a href="/notes/{{ note.id }}">{{ note.title }}</a></div>
+                        <div class="note-meta">{{ note.created }}</div>
+                    </div>
+                    <div class="note-actions">
+                        <a href="/notes/{{ note.id }}" class="action-btn">预览</a>
+                        <a href="/api/notes/{{ note.id }}/download" class="action-btn">下载</a>
+                        <button class="action-btn" onclick="renameNote('{{ note.id }}', '{{ note.title }}')">重命名</button>
+                        <button class="action-btn" onclick="shareNote('{{ note.id }}')">分享</button>
+                        <button class="action-btn danger" onclick="deleteNote('{{ note.id }}')">删除</button>
+                    </div>
                 </div>
             </div>
             {% endfor %}
             {% if not notes %}
-            <p style="text-align:center;color:rgba(255,255,255,0.3);margin-top:50px;">暂无笔记</p>
+            <div style="text-align:center;padding:40px;color:rgba(255,255,255,0.3);">暂无笔记</div>
             {% endif %}
         </div>
     </div>
-    
-    <div class="modal" id="addModal">
-        <div class="modal-content">
+    <div class="modal" id="createModal">
+        <div class="modal-box">
             <h3>新建笔记</h3>
             <input type="text" id="noteTitle" placeholder="标题">
-            <textarea id="noteContent" placeholder="内容 (支持 Markdown)"></textarea>
+            <textarea id="noteContent" placeholder="内容 (支持Markdown)"></textarea>
             <div class="btn-row">
-                <button class="btn-secondary" onclick="closeModal()">取消</button>
-                <button class="btn-primary" onclick="saveNote()">保存</button>
+                <button class="btn-secondary" onclick="closeModal('createModal')">取消</button>
+                <button class="btn-primary" onclick="createNote()">创建</button>
             </div>
         </div>
     </div>
-    
+    <div class="modal" id="renameModal">
+        <div class="modal-box">
+            <h3>重命名笔记</h3>
+            <input type="text" id="newTitle" placeholder="新标题">
+            <div class="btn-row">
+                <button class="btn-secondary" onclick="closeModal('renameModal')">取消</button>
+                <button class="btn-primary" onclick="doRenameNote()">确定</button>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="shareModal">
+        <div class="modal-box">
+            <h3>分享链接</h3>
+            <div class="share-url" id="shareUrl">生成中...</div>
+            <div class="btn-row" style="margin-top:12px">
+                <button class="btn-primary" onclick="copyShare()">复制链接</button>
+                <button class="btn-secondary" onclick="closeModal('shareModal')">关闭</button>
+            </div>
+        </div>
+    </div>
     <script>
-        function openModal() { document.getElementById('addModal').classList.add('active'); }
-        function closeModal() { document.getElementById('addModal').classList.remove('active'); }
-        
-        async function saveNote() {
-            await fetch('/api/notes', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    title: document.getElementById('noteTitle').value,
-                    content: document.getElementById('noteContent').value
-                })
-            });
-            location.reload();
+        var currentNoteId = '';
+        function openModal(id) { document.getElementById(id).classList.add('active'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+        async function createNote() {
+            var title = document.getElementById('noteTitle').value;
+            var content = document.getElementById('noteContent').value;
+            await fetch('/api/notes', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title:title, content:content})});
+            closeModal('createModal'); location.reload();
         }
-        
         async function deleteNote(id) {
-            if (!confirm('确定删除？')) return;
-            await fetch(`/api/notes/${id}`, {method: 'DELETE'});
-            location.reload();
+            if (!confirm('确定删除此笔记？')) return;
+            await fetch('/api/notes/' + id, {method:'DELETE'}); location.reload();
         }
+        function renameNote(id, title) {
+            currentNoteId = id;
+            document.getElementById('newTitle').value = title;
+            openModal('renameModal');
+        }
+        async function doRenameNote() {
+            var title = document.getElementById('newTitle').value;
+            await fetch('/api/notes/' + currentNoteId + '/rename', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title:title})});
+            closeModal('renameModal'); location.reload();
+        }
+        async function shareNote(id) {
+            openModal('shareModal');
+            document.getElementById('shareUrl').textContent = '生成中...';
+            var r = await fetch('/api/notes/' + id + '/share', {method:'POST'});
+            var d = await r.json();
+            if (d.success) document.getElementById('shareUrl').textContent = window.location.origin + d.url;
+        }
+        function copyShare() { navigator.clipboard.writeText(document.getElementById('shareUrl').textContent); alert('已复制'); }
     </script>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-    </script>
+    <script>''' + WATERMARK_JS + '''</script>
 </body>
 </html>'''
 
+
+# ============================================================================
+# HTML模板 - 笔记详情
+# ============================================================================
 
 NOTE_DETAIL_HTML = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>笔记详情 - 私密中心</title>
+    <title>{{ title }} - Private Hub</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
-        nav {
-            background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1);
-            padding: 15px 30px; display: flex; justify-content: space-between; align-items: center;
+        body { min-height: 100vh; background: #0f0f1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+        ''' + NAV_CSS + '''
+        .container { max-width: 800px; margin: 0 auto; padding: 24px; }
+        .note-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .note-title { font-size: 24px; font-weight: 600; }
+        .note-actions { display: flex; gap: 8px; }
+        .action-btn {
+            padding: 8px 14px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+            background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.7); cursor: pointer;
+            font-size: 13px; text-decoration: none; transition: all 0.2s;
         }
-        nav .logo { font-size: 20px; font-weight: bold; }
-        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
-        nav .links a:hover { color: #e94560; }
-        .container { max-width: 800px; margin: 0 auto; padding: 30px; }
+        .action-btn:hover { background: rgba(233,69,96,0.2); border-color: rgba(233,69,96,0.4); color: #fff; }
         .content {
-            background: rgba(255,255,255,0.05); border-radius: 12px; padding: 30px;
-            white-space: pre-wrap; line-height: 1.8;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 24px; white-space: pre-wrap; line-height: 1.8; font-size: 14px;
         }
-        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
-        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-box { background: #1a1a2e; border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 24px; width: 360px; }
+        .modal-box h3 { margin-bottom: 16px; font-size: 16px; }
+        .modal-box input { width: 100%; padding: 10px 14px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.08); color: #fff; font-size: 13px; outline: none; }
+        .btn-row { display: flex; gap: 8px; }
+        .btn-row button { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .btn-primary { background: #e94560; color: #fff; }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
+        .share-url { padding: 10px; background: rgba(0,184,148,0.1); border: 1px solid rgba(0,184,148,0.3); border-radius: 8px; word-break: break-all; font-size: 12px; margin-top: 10px; }
+        ''' + RESPONSIVE_CSS + WATERMARK_CSS + '''
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">📝 笔记详情</div>
-        <div class="links">
-            <a href="/notes">返回列表</a>
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
+    ''' + nav_html("") + '''
     <div class="container">
+        <div class="note-header">
+            <div class="note-title">{{ title }}</div>
+            <div class="note-actions">
+                <a href="/api/notes/{{ note_id }}/download" class="action-btn">下载</a>
+                <button class="action-btn" onclick="renameNote()">重命名</button>
+                <button class="action-btn" onclick="shareNote()">分享</button>
+                <button class="action-btn" onclick="deleteNote()">删除</button>
+                <a href="/notes" class="action-btn">返回列表</a>
+            </div>
+        </div>
         <div class="content">{{ content }}</div>
     </div>
+    <div class="modal" id="renameModal">
+        <div class="modal-box">
+            <h3>重命名笔记</h3>
+            <input type="text" id="newTitle" value="{{ title }}" placeholder="新标题">
+            <div class="btn-row">
+                <button class="btn-secondary" onclick="closeModal('renameModal')">取消</button>
+                <button class="btn-primary" onclick="doRename()">确定</button>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="shareModal">
+        <div class="modal-box">
+            <h3>分享链接</h3>
+            <div class="share-url" id="shareUrl">生成中...</div>
+            <div class="btn-row" style="margin-top:12px">
+                <button class="btn-primary" onclick="copyShare()">复制链接</button>
+                <button class="btn-secondary" onclick="closeModal('shareModal')">关闭</button>
+            </div>
+        </div>
+    </div>
     <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+        function openModal(id) { document.getElementById(id).classList.add('active'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+        async function deleteNote() {
+            if (!confirm('确定删除此笔记？')) return;
+            await fetch('/api/notes/{{ note_id }}', {method:'DELETE'});
+            window.location = '/notes';
+        }
+        function renameNote() { openModal('renameModal'); }
+        async function doRename() {
+            var title = document.getElementById('newTitle').value;
+            await fetch('/api/notes/{{ note_id }}/rename', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title:title})});
+            location.reload();
+        }
+        async function shareNote() {
+            openModal('shareModal');
+            document.getElementById('shareUrl').textContent = '生成中...';
+            var r = await fetch('/api/notes/{{ note_id }}/share', {method:'POST'});
+            var d = await r.json();
+            if (d.success) document.getElementById('shareUrl').textContent = window.location.origin + d.url;
+        }
+        function copyShare() { navigator.clipboard.writeText(document.getElementById('shareUrl').textContent); alert('已复制'); }
     </script>
+    <script>''' + WATERMARK_JS + '''</script>
 </body>
 </html>'''
 
+
+# ============================================================================
+# HTML模板 - 分享笔记页面（无需登录）
+# ============================================================================
+
+SHARED_NOTE_HTML = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - 分享</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+        .header { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 16px 24px; text-align: center; }
+        .header h1 { font-size: 18px; }
+        .header p { color: rgba(255,255,255,0.4); font-size: 12px; margin-top: 4px; }
+        .container { max-width: 800px; margin: 30px auto; padding: 0 24px; }
+        .content { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 24px; white-space: pre-wrap; line-height: 1.8; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{{ title }}</h1>
+        <p>由 Private Hub 分享</p>
+    </div>
+    <div class="container">
+        <div class="content">{{ content }}</div>
+    </div>
+</body>
+</html>'''
+
+
+# ============================================================================
+# HTML模板 - 修改密码
+# ============================================================================
 
 CHANGE_PWD_HTML = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>修改密码 - 私密中心</title>
+    <title>修改密码 - Private Hub</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
-        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        nav .logo { font-size: 20px; font-weight: bold; }
-        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
-        nav .links a:hover { color: #e94560; }
-        .container { max-width: 500px; margin: 50px auto; padding: 30px; }
-        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 30px; }
-        .card h2 { margin-bottom: 20px; }
-        .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 8px; color: rgba(255,255,255,0.7); }
-        .form-group input { width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(255,255,255,0.1); color: #fff; font-size: 14px; }
-        .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; background: #e94560; color: #fff; font-size: 16px; cursor: pointer; }
-        .btn:hover { background: #c23152; }
-        .error { color: #ff6b6b; margin-bottom: 15px; font-size: 14px; }
-        .success { color: #00b894; margin-bottom: 15px; font-size: 14px; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+        ''' + NAV_CSS + '''
+        .container { max-width: 400px; margin: 40px auto; padding: 0 24px; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; }
+        .card h2 { margin-bottom: 20px; font-size: 18px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; color: rgba(255,255,255,0.5); font-size: 12px; }
+        .form-group input { width: 100%; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.08); color: #fff; font-size: 13px; outline: none; }
+        .form-group input:focus { border-color: #e94560; }
+        .btn { width: 100%; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .btn-primary { background: #e94560; color: #fff; }
+        .btn-primary:hover { background: #c23152; }
+        .error { color: #ff6b6b; font-size: 13px; margin-bottom: 12px; }
+        .success { color: #00b894; font-size: 13px; margin-bottom: 12px; }
+        ''' + RESPONSIVE_CSS + WATERMARK_CSS + '''
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">🔑 修改密码</div>
-        <div class="links">
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
+    ''' + nav_html("password") + '''
     <div class="container">
         <div class="card">
             <h2>修改密码</h2>
             {% if error %}<div class="error">{{ error }}</div>{% endif %}
             {% if success %}<div class="success">{{ success }}</div>{% endif %}
             <form method="POST">
-                <div class="form-group">
-                    <label>原密码</label>
-                    <input type="password" name="old_password" required>
-                </div>
-                <div class="form-group">
-                    <label>新密码</label>
-                    <input type="password" name="new_password" required>
-                </div>
-                <div class="form-group">
-                    <label>确认新密码</label>
-                    <input type="password" name="confirm_password" required>
-                </div>
-                <button type="submit" class="btn">确认修改</button>
+                <div class="form-group"><label>原密码</label><input type="password" name="old_password" required></div>
+                <div class="form-group"><label>新密码</label><input type="password" name="new_password" required></div>
+                <div class="form-group"><label>确认新密码</label><input type="password" name="confirm_password" required></div>
+                <button type="submit" class="btn btn-primary">确认修改</button>
             </form>
         </div>
     </div>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-    </script>
+    <script>''' + WATERMARK_JS + '''</script>
 </body>
 </html>'''
 
+
+# ============================================================================
+# HTML模板 - 用户管理
+# ============================================================================
 
 ADMIN_USERS_HTML = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>用户管理 - 私密中心</title>
+    <title>用户管理 - Private Hub</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
-        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        nav .logo { font-size: 20px; font-weight: bold; }
-        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
-        nav .links a:hover { color: #e94560; }
-        .container { max-width: 800px; margin: 30px auto; padding: 30px; }
-        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 30px; margin-bottom: 20px; }
-        .card h2 { margin-bottom: 20px; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+        ''' + NAV_CSS + '''
+        .container { max-width: 900px; margin: 0 auto; padding: 24px; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; margin-bottom: 16px; }
+        .card h2 { margin-bottom: 16px; font-size: 16px; }
+        .form-row { display: flex; gap: 8px; margin-bottom: 16px; }
+        .form-row input, .form-row select { flex: 1; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.08); color: #fff; font-size: 13px; outline: none; }
+        .form-row select option { background: #1a1a2e; }
         table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
-        th { color: rgba(255,255,255,0.6); font-size: 14px; }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        th { color: rgba(255,255,255,0.4); font-size: 12px; text-transform: uppercase; }
         .role-admin { color: #e94560; }
         .role-user { color: #00b894; }
-        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin-right: 5px; }
-        .btn-danger { background: #e94560; color: #fff; }
-        .btn-warning { background: #fdcb6e; color: #000; }
-        .btn-primary { background: #0984e3; color: #fff; }
-        .form-row { display: flex; gap: 10px; margin-bottom: 15px; }
-        .form-row input, .form-row select { flex: 1; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; background: rgba(255,255,255,0.1); color: #fff; }
-        .msg { padding: 10px; border-radius: 6px; margin-bottom: 15px; display: none; }
-        .msg.error { background: rgba(233,69,96,0.2); color: #ff6b6b; display: block; }
-        .msg.success { background: rgba(0,184,148,0.2); color: #00b894; display: block; }
+        .action-btn {
+            padding: 6px 10px; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+            background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.7); cursor: pointer;
+            font-size: 12px; transition: all 0.2s; margin-right: 4px;
+        }
+        .action-btn:hover { background: rgba(233,69,96,0.2); color: #fff; }
+        .action-btn.primary { background: #e94560; color: #fff; border-color: #e94560; }
+        .msg { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+        .msg.error { background: rgba(233,69,96,0.15); color: #ff6b6b; }
+        .msg.success { background: rgba(0,184,148,0.15); color: #00b894; }
+        ''' + RESPONSIVE_CSS + WATERMARK_CSS + '''
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">👥 用户管理</div>
-        <div class="links">
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
-            <a href="/admin/users">用户管理</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
+    ''' + nav_html("users") + '''
     <div class="container">
         <div class="card">
             <h2>添加用户</h2>
-            <div id="msg" class="msg"></div>
+            <div id="msg"></div>
             <div class="form-row">
                 <input type="text" id="newUsername" placeholder="用户名">
                 <input type="password" id="newPassword" placeholder="密码">
-                <select id="newRole">
-                    <option value="user">普通用户</option>
-                    <option value="admin">管理员</option>
-                </select>
-                <button class="btn btn-primary" onclick="addUser()">添加</button>
+                <select id="newRole"><option value="user">普通用户</option><option value="admin">管理员</option></select>
+                <button class="action-btn primary" onclick="addUser()">添加</button>
             </div>
         </div>
         <div class="card">
             <h2>用户列表</h2>
             <table>
-                <thead>
-                    <tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr>
-                </thead>
+                <thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead>
                 <tbody>
                     {% for username, user in users.items() %}
                     <tr>
                         <td>{{ username }}</td>
-                        <td class="role-{{ user.role }}">{{ '管理员' if user.role == 'admin' else '普通用户' }}</td>
+                        <td class="role-{{ user.role }}">{{ '管理员' if user.role == 'admin' else '用户' }}</td>
                         <td>{{ user.created_at }}</td>
                         <td>
-                            {% if username != 'admin' %}
-                            <button class="btn btn-warning" onclick="resetPassword('{{ username }}')">重置密码</button>
-                            <button class="btn btn-danger" onclick="deleteUser('{{ username }}')">删除</button>
+                            {% if username != '001' %}
+                            <button class="action-btn" onclick="resetPassword('{{ username }}')">重置密码</button>
+                            <button class="action-btn" onclick="deleteUser('{{ username }}')">删除</button>
                             {% else %}
-                            <span style="color:rgba(255,255,255,0.3)">--</span>
+                            <span style="color:rgba(255,255,255,0.2)">-</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -1415,248 +1583,47 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
         </div>
     </div>
     <script>
-        function showMsg(text, type) {
-            var msg = document.getElementById('msg');
-            msg.textContent = text;
-            msg.className = 'msg ' + type;
-            setTimeout(function(){ msg.className = 'msg'; }, 3000);
-        }
+        function showMsg(text, type) { var m = document.getElementById('msg'); m.textContent = text; m.className = 'msg ' + type; setTimeout(function(){ m.className = 'msg'; }, 3000); }
         async function addUser() {
-            var data = new FormData();
-            data.append('username', document.getElementById('newUsername').value);
-            data.append('password', document.getElementById('newPassword').value);
-            data.append('role', document.getElementById('newRole').value);
-            var res = await fetch('/admin/users/add', {method: 'POST', body: data});
-            var json = await res.json();
-            if (json.success) { location.reload(); } else { showMsg(json.error, 'error'); }
+            var fd = new FormData(); fd.append('username', document.getElementById('newUsername').value); fd.append('password', document.getElementById('newPassword').value); fd.append('role', document.getElementById('newRole').value);
+            var r = await fetch('/admin/users/add', {method:'POST', body:fd}); var d = await r.json();
+            if (d.success) location.reload(); else showMsg(d.error, 'error');
         }
-        async function deleteUser(username) {
-            if (!confirm('确定删除用户 ' + username + '？')) return;
-            await fetch('/admin/users/' + username, {method: 'DELETE'});
-            location.reload();
-        }
-        async function resetPassword(username) {
-            var res = await fetch('/admin/users/' + username + '/reset-password', {method: 'POST'});
-            var json = await res.json();
-            if (json.success) { alert('新密码: ' + json.password); } else { alert(json.error); }
-        }
+        async function deleteUser(u) { if (!confirm('确定删除 ' + u + '？')) return; await fetch('/admin/users/' + u, {method:'DELETE'}); location.reload(); }
+        async function resetPassword(u) { var r = await fetch('/admin/users/' + u + '/reset-password', {method:'POST'}); var d = await r.json(); if (d.success) alert('新密码: ' + d.password); }
     </script>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-    </script>
+    <script>''' + WATERMARK_JS + '''</script>
 </body>
 </html>'''
 
+
+# ============================================================================
+# HTML模板 - 文件预览
+# ============================================================================
 
 PREVIEW_TEXT_HTML = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>预览 - {{ filename }}</title>
+    <title>{{ filename }} - 预览</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', monospace; color: #fff; }
-        .header { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        .header h1 { font-size: 16px; color: #e94560; }
-        .header a { color: rgba(255,255,255,0.7); text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 8px; }
-        .header a:hover { background: rgba(233,69,96,0.3); }
-        .content { max-width: 1000px; margin: 30px auto; padding: 30px; background: rgba(255,255,255,0.05); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
-        pre { white-space: pre-wrap; word-wrap: break-word; line-height: 1.6; font-size: 14px; color: rgba(255,255,255,0.8); }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Consolas', 'Monaco', monospace; color: #fff; }
+        .header { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 14px; color: #e94560; }
+        .header a { color: rgba(255,255,255,0.6); text-decoration: none; padding: 6px 12px; background: rgba(255,255,255,0.08); border-radius: 6px; font-size: 12px; }
+        .header a:hover { background: rgba(255,255,255,0.15); }
+        .content { max-width: 1000px; margin: 24px auto; padding: 24px; background: rgba(255,255,255,0.05); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); }
+        pre { white-space: pre-wrap; word-wrap: break-word; line-height: 1.6; font-size: 13px; color: rgba(255,255,255,0.8); }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>📄 {{ filename }}</h1>
-        <div>
-            <a href="/download/{{ filename }}">下载</a>
-            <a href="/files">返回文件列表</a>
-        </div>
+        <h1>{{ filename }}</h1>
+        <div><a href="/download/{{ filename }}">下载</a> <a href="/files">返回</a></div>
     </div>
-    <div class="content">
-        <pre>{{ content }}</pre>
-    </div>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-    </script>
-</body>
-</html>'''
-
-
-DATA_HTML = '''<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数据模块 - 私密中心</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
-        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        nav .logo { font-size: 20px; font-weight: bold; }
-        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
-        nav .links a:hover { color: #e94560; }
-        .container { max-width: 1200px; margin: 30px auto; padding: 30px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 25px; transition: transform 0.2s; }
-        .card:hover { transform: translateY(-3px); border-color: rgba(233,69,96,0.5); }
-        .card h3 { color: #e94560; margin-bottom: 15px; font-size: 16px; }
-        .stat-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .stat-row:last-child { border: none; }
-        .stat-label { color: rgba(255,255,255,0.6); }
-        .stat-value { font-weight: bold; }
-        .progress-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; margin-top: 8px; overflow: hidden; }
-        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
-        .progress-fill.green { background: linear-gradient(90deg, #00b894, #55efc4); }
-        .progress-fill.yellow { background: linear-gradient(90deg, #fdcb6e, #f39c12); }
-        .progress-fill.red { background: linear-gradient(90deg, #e94560, #ff6b6b); }
-        .section-title { font-size: 18px; margin-bottom: 20px; color: rgba(255,255,255,0.9); }
-        .quick-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
-        .quick-link { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; text-align: center; text-decoration: none; color: #fff; transition: all 0.2s; }
-        .quick-link:hover { background: rgba(233,69,96,0.2); border-color: #e94560; transform: translateY(-3px); }
-        .quick-link .icon { font-size: 32px; margin-bottom: 10px; display: block; }
-        .quick-link .name { font-size: 14px; color: rgba(255,255,255,0.8); }
-        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; margin-right: 10px; margin-bottom: 10px; }
-        .btn-primary { background: #e94560; color: #fff; }
-        .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
-        .btn:hover { opacity: 0.8; }
-        .log-box { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 15px; font-family: monospace; font-size: 13px; max-height: 200px; overflow-y: auto; color: rgba(255,255,255,0.7); }
-        .log-entry { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .log-time { color: rgba(255,255,255,0.4); margin-right: 10px; }
-        @media (max-width: 768px) {
-            nav { flex-direction: column; gap: 10px; padding: 10px 15px; }
-            nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
-            nav .links a { margin: 0; padding: 5px 10px; font-size: 12px; }
-            .container { padding: 15px; }
-            .grid { grid-template-columns: 1fr !important; }
-            .quick-links { grid-template-columns: repeat(2, 1fr) !important; }
-        }
-    </style>
-</head>
-<body>
-    <nav>
-        <div class="logo">📊 数据模块</div>
-        <div class="links">
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
-            <a href="/startpage">启动页</a>
-            <a href="/files">文件</a>
-            <a href="/notes">笔记</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
-    <div class="container">
-        <div class="grid">
-            <div class="card">
-                <h3>📈 站点统计</h3>
-                <div id="stats-info">
-                    <div class="stat-row"><span class="stat-label">书签数量</span><span class="stat-value" id="bm-count">加载中...</span></div>
-                    <div class="stat-row"><span class="stat-label">笔记数量</span><span class="stat-value" id="note-count">加载中...</span></div>
-                    <div class="stat-row"><span class="stat-label">文件数量</span><span class="stat-value" id="file-count">加载中...</span></div>
-                    <div class="stat-row"><span class="stat-label">运行时间</span><span class="stat-value" id="uptime">加载中...</span></div>
-                </div>
-            </div>
-            <div class="card">
-                <h3>💻 服务器状态</h3>
-                <div id="server-info">
-                    <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value" id="cpu">加载中...</span></div>
-                    <div class="progress-bar"><div class="progress-fill green" id="cpu-bar" style="width:0%"></div></div>
-                    <div class="stat-row"><span class="stat-label">内存</span><span class="stat-value" id="mem">加载中...</span></div>
-                    <div class="progress-bar"><div class="progress-fill green" id="mem-bar" style="width:0%"></div></div>
-                    <div class="stat-row"><span class="stat-label">磁盘</span><span class="stat-value" id="disk">加载中...</span></div>
-                    <div class="progress-bar"><div class="progress-fill green" id="disk-bar" style="width:0%"></div></div>
-                </div>
-            </div>
-            <div class="card">
-                <h3>🔄 操作日志</h3>
-                <div class="log-box" id="log-box">
-                    <div class="log-entry"><span class="log-time">--:--</span>系统启动</div>
-                </div>
-            </div>
-        </div>
-
-        <h2 class="section-title">快捷访问</h2>
-        <div class="quick-links">
-            <a href="/" class="quick-link"><span class="icon">🏠</span><span class="name">仪表盘</span></a>
-            <a href="/startpage" class="quick-link"><span class="icon">🚀</span><span class="name">启动页</span></a>
-            <a href="/files" class="quick-link"><span class="icon">📁</span><span class="name">文件管理</span></a>
-            <a href="/notes" class="quick-link"><span class="icon">📝</span><span class="name">笔记</span></a>
-            <a href="/admin/users" class="quick-link"><span class="icon">👥</span><span class="name">用户管理</span></a>
-            <a href="/change-password" class="quick-link"><span class="icon">🔑</span><span class="name">修改密码</span></a>
-        </div>
-
-        <h2 class="section-title" style="margin-top: 30px;">数据操作</h2>
-        <div class="card">
-            <button class="btn btn-primary" onclick="exportData()">📥 导出所有数据</button>
-            <button class="btn btn-secondary" onclick="refreshAll()">🔄 刷新数据</button>
-            <div style="margin-top: 15px;">
-                <span class="stat-label">上次刷新: </span><span id="last-refresh">--</span>
-            </div>
-        </div>
-    </div>
-    <script>
-        function getProgressClass(percent) {
-            if (percent > 80) return 'red';
-            if (percent > 60) return 'yellow';
-            return 'green';
-        }
-        async function loadStats() {
-            try {
-                var res = await fetch('/api/data/stats');
-                var data = await res.json();
-                document.getElementById('bm-count').textContent = data.bookmarks || 0;
-                document.getElementById('note-count').textContent = data.notes || 0;
-                document.getElementById('file-count').textContent = data.files || 0;
-                document.getElementById('uptime').textContent = data.uptime || '--';
-            } catch(e) {}
-        }
-        async function loadSystem() {
-            try {
-                var res = await fetch('/api/system');
-                var data = await res.json();
-                document.getElementById('cpu').textContent = data.cpu_percent + '%';
-                document.getElementById('mem').textContent = data.memory_used_gb + 'GB / ' + data.memory_total_gb + 'GB';
-                document.getElementById('disk').textContent = data.disk_used_gb + 'GB / ' + data.disk_total_gb + 'GB';
-                var cpuBar = document.getElementById('cpu-bar');
-                cpuBar.style.width = data.cpu_percent + '%';
-                cpuBar.className = 'progress-fill ' + getProgressClass(data.cpu_percent);
-                var memBar = document.getElementById('mem-bar');
-                memBar.style.width = data.memory_percent + '%';
-                memBar.className = 'progress-fill ' + getProgressClass(data.memory_percent);
-                var diskBar = document.getElementById('disk-bar');
-                diskBar.style.width = data.disk_percent + '%';
-                diskBar.className = 'progress-fill ' + getProgressClass(data.disk_percent);
-            } catch(e) {}
-        }
-        function addLog(msg) {
-            var now = new Date();
-            var time = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-            var box = document.getElementById('log-box');
-            box.innerHTML = '<div class="log-entry"><span class="log-time">' + time + '</span>' + msg + '</div>' + box.innerHTML;
-        }
-        function exportData() {
-            window.open('/api/data/export', '_blank');
-            addLog('导出数据');
-        }
-        async function refreshAll() {
-            await loadStats();
-            await loadSystem();
-            document.getElementById('last-refresh').textContent = new Date().toLocaleString('zh-CN');
-            addLog('刷新数据');
-        }
-        loadStats();
-        loadSystem();
-        setInterval(loadSystem, 5000);
-        setInterval(loadStats, 30000);
-        document.getElementById('last-refresh').textContent = new Date().toLocaleString('zh-CN');
-    </script>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-    </script>
+    <div class="content"><pre>{{ content }}</pre></div>
 </body>
 </html>'''
 
