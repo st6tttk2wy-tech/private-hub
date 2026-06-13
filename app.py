@@ -63,6 +63,8 @@ NEWS_SOURCES = {
     "zhihu": {"name": "知乎", "icon": "💡", "api": "https://api.vvhan.com/api/hotlist/zhihuHot"},
     "bilibili": {"name": "B站", "icon": "📺", "api": "https://api.vvhan.com/api/hotlist/bili"},
     "baidu": {"name": "百度", "icon": "🔍", "api": "https://api.vvhan.com/api/hotlist/baiduRD"},
+    "xiaohongshu": {"name": "小红书", "icon": "📕", "api": "https://api.vvhan.com/api/hotlist/xhsHot"},
+    "qq-news": {"name": "今日资讯", "icon": "📢", "api": "https://api.vvhan.com/api/hotlist/qq-news"},
 }
 
 WATERMARK_CSS = '''
@@ -1977,114 +1979,91 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>用户管理 - 私密中心</title>
+    <title>用户管理 - Private Hub</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
-        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        nav .logo { font-size: 20px; font-weight: bold; }
-        nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
-        nav .links a:hover { color: #e94560; }
-        .container { max-width: 800px; margin: 30px auto; padding: 30px; }
-        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 30px; margin-bottom: 20px; }
-        .card h2 { margin-bottom: 20px; }
+        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+        nav .logo { font-size: 18px; font-weight: bold; color: #fff; }
+        nav .links { display: flex; gap: 4px; align-items: center; }
+        nav .links a { color: rgba(255,255,255,0.6); text-decoration: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; transition: all 0.2s; }
+        nav .links a:hover { color: #fff; background: rgba(255,255,255,0.1); }
+        nav .links a.active { color: #e94560; background: rgba(233,69,96,0.1); }
+        .container { max-width: 900px; margin: 0 auto; padding: 30px; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; margin-bottom: 16px; }
+        .card h2 { margin-bottom: 16px; font-size: 16px; color: #e94560; }
+        .form-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .form-row input, .form-row select { flex: 1; min-width: 120px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.08); color: #fff; font-size: 13px; }
+        .form-row select option { background: #1a1a2e; }
         table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
-        th { color: rgba(255,255,255,0.6); font-size: 14px; }
+        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        th { color: rgba(255,255,255,0.4); font-size: 12px; text-transform: uppercase; }
         .role-admin { color: #e94560; }
         .role-user { color: #00b894; }
-        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin-right: 5px; }
-        .btn-danger { background: #e94560; color: #fff; }
-        .btn-warning { background: #fdcb6e; color: #000; }
-        .btn-primary { background: #0984e3; color: #fff; }
-        .form-row { display: flex; gap: 10px; margin-bottom: 15px; }
-        .form-row input, .form-row select { flex: 1; padding: 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; background: rgba(255,255,255,0.1); color: #fff; }
-        .msg { padding: 10px; border-radius: 6px; margin-bottom: 15px; display: none; }
-        .msg.error { background: rgba(233,69,96,0.2); color: #ff6b6b; display: block; }
-        .msg.success { background: rgba(0,184,148,0.2); color: #00b894; display: block; }
+        .action-btn { padding: 6px 10px; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.7); cursor: pointer; font-size: 12px; margin-right: 4px; }
+        .action-btn:hover { background: rgba(233,69,96,0.2); color: #fff; }
+        .perm-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+        .perm-tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); }
+        .perm-tag.active { background: rgba(0,184,148,0.2); border-color: rgba(0,184,148,0.5); color: #00b894; }
+        .msg { padding: 10px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
+        .msg.error { background: rgba(233,69,96,0.15); color: #ff6b6b; }
+        .msg.success { background: rgba(0,184,148,0.15); color: #00b894; }
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">👥 用户管理</div>
-        <div class="links">
-            <a href="/">首页</a>
-            <a href="/data">数据</a>
-            <a href="/admin/users">用户管理</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
+    {{ nav|safe }}
     <div class="container">
         <div class="card">
             <h2>添加用户</h2>
-            <div id="msg" class="msg"></div>
+            <div id="msg"></div>
             <div class="form-row">
                 <input type="text" id="newUsername" placeholder="用户名">
                 <input type="password" id="newPassword" placeholder="密码">
-                <select id="newRole">
-                    <option value="user">普通用户</option>
-                    <option value="admin">管理员</option>
-                </select>
-                <button class="btn btn-primary" onclick="addUser()">添加</button>
+                <select id="newRole"><option value="user">普通用户</option><option value="admin">管理员</option></select>
+                <button class="action-btn" onclick="addUser()" style="background:#e94560;color:#fff;">添加</button>
+            </div>
+            <div class="form-row" id="permRow" style="display:none">
+                <span style="color:rgba(255,255,255,0.5);font-size:13px;min-width:60px;">权限:</span>
+                <div class="perm-tags">
+                    <span class="perm-tag" data-perm="home" onclick="togglePerm(this)">首页</span>
+                    <span class="perm-tag" data-perm="news" onclick="togglePerm(this)">信息</span>
+                    <span class="perm-tag" data-perm="files" onclick="togglePerm(this)">文件</span>
+                    <span class="perm-tag" data-perm="notes" onclick="togglePerm(this)">笔记</span>
+                    <span class="perm-tag" data-perm="data" onclick="togglePerm(this)">数据</span>
+                </div>
             </div>
         </div>
         <div class="card">
             <h2>用户列表</h2>
-            <table>
-                <thead>
-                    <tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr>
-                </thead>
-                <tbody>
-                    {% for username, user in users.items() %}
-                    <tr>
-                        <td>{{ username }}</td>
-                        <td class="role-{{ user.role }}">{{ '管理员' if user.role == 'admin' else '普通用户' }}</td>
-                        <td>{{ user.created_at }}</td>
-                        <td>
-                            {% if username != 'admin' %}
-                            <button class="btn btn-warning" onclick="resetPassword('{{ username }}')">重置密码</button>
-                            <button class="btn btn-danger" onclick="deleteUser('{{ username }}')">删除</button>
-                            {% else %}
-                            <span style="color:rgba(255,255,255,0.3)">--</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <table><thead><tr><th>用户名</th><th>角色</th><th>权限</th><th>创建时间</th><th>操作</th></tr></thead><tbody>
+            {% for username, user in users.items() %}
+            <tr>
+                <td>{{ username }}</td>
+                <td class="role-{{ user.role }}">{{ '管理员' if user.role == 'admin' else '用户' }}</td>
+                <td>{% if user.role == 'admin' %}全部{% else %}{{ user.permissions|join(', ') }}{% endif %}</td>
+                <td>{{ user.created_at }}</td>
+                <td>
+                    {% if username != '001' %}
+                    <button class="action-btn" onclick="resetPassword('{{ username }}')">重置密码</button>
+                    <button class="action-btn" onclick="deleteUser('{{ username }}')">删除</button>
+                    {% else %}-{% endif %}
+                </td></tr>
+            {% endfor %}</tbody></table>
         </div>
     </div>
     <script>
-        function showMsg(text, type) {
-            var msg = document.getElementById('msg');
-            msg.textContent = text;
-            msg.className = 'msg ' + type;
-            setTimeout(function(){ msg.className = 'msg'; }, 3000);
+        document.getElementById('newRole').onchange=function(){document.getElementById('permRow').style.display=this.value==='user'?'flex':'none';};
+        function togglePerm(el){el.classList.toggle('active');}
+        function getPermissions(){return Array.from(document.querySelectorAll('.perm-tag.active')).map(function(p){return p.dataset.perm;});}
+        function showMsg(t,c){var m=document.getElementById('msg');m.textContent=t;m.className='msg '+c;setTimeout(function(){m.className='msg';},3000);}
+        async function addUser(){
+            var fd=new FormData();fd.append('username',document.getElementById('newUsername').value);fd.append('password',document.getElementById('newPassword').value);fd.append('role',document.getElementById('newRole').value);
+            getPermissions().forEach(function(p){fd.append('permissions',p);});
+            var r=await fetch('/admin/users/add',{method:'POST',body:fd});var d=await r.json();
+            if(d.success)location.reload();else showMsg(d.error,'error');
         }
-        async function addUser() {
-            var data = new FormData();
-            data.append('username', document.getElementById('newUsername').value);
-            data.append('password', document.getElementById('newPassword').value);
-            data.append('role', document.getElementById('newRole').value);
-            var res = await fetch('/admin/users/add', {method: 'POST', body: data});
-            var json = await res.json();
-            if (json.success) { location.reload(); } else { showMsg(json.error, 'error'); }
-        }
-        async function deleteUser(username) {
-            if (!confirm('确定删除用户 ' + username + '？')) return;
-            await fetch('/admin/users/' + username, {method: 'DELETE'});
-            location.reload();
-        }
-        async function resetPassword(username) {
-            var res = await fetch('/admin/users/' + username + '/reset-password', {method: 'POST'});
-            var json = await res.json();
-            if (json.success) { alert('新密码: ' + json.password); } else { alert(json.error); }
-        }
-    </script>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+        async function deleteUser(u){if(!confirm('确定删除 '+u+'？'))return;await fetch('/admin/users/'+u,{method:'DELETE'});location.reload();}
+        async function resetPassword(u){var r=await fetch('/admin/users/'+u+'/reset-password',{method:'POST'});var d=await r.json();if(d.success)alert('新密码: '+d.password);}
     </script>
 </body>
 </html>'''
