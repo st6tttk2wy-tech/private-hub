@@ -414,6 +414,35 @@ def api_system():
     })
 
 
+@app.route("/api/data/stats")
+@login_required
+def api_data_stats():
+    bookmarks = load_bookmarks()
+    notes = load_notes_index()
+    files_count = sum(1 for _ in FILES_DIR.rglob("*") if _.is_file()) if FILES_DIR.exists() else 0
+    boot_time = datetime.fromtimestamp(psutil.boot_time())
+    uptime = datetime.now() - boot_time
+    return jsonify({
+        "bookmarks": len(bookmarks),
+        "notes": len(notes),
+        "files": files_count,
+        "uptime": str(uptime).split(".")[0]
+    })
+
+
+@app.route("/api/data/export")
+@login_required
+def api_data_export():
+    data = {
+        "bookmarks": load_bookmarks(),
+        "notes": load_notes_index(),
+        "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    return jsonify(data), 200, {
+        "Content-Disposition": "attachment; filename=private_hub_export.json"
+    }
+
+
 # ============================================================================
 # 数据操作
 # ============================================================================
@@ -1308,13 +1337,32 @@ DATA_HTML = '''<!DOCTYPE html>
         nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
         nav .links a:hover { color: #e94560; }
         .container { max-width: 1200px; margin: 30px auto; padding: 30px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 25px; transition: transform 0.2s; }
         .card:hover { transform: translateY(-3px); border-color: rgba(233,69,96,0.5); }
-        .card h3 { color: #e94560; margin-bottom: 15px; }
-        .card p { color: rgba(255,255,255,0.6); line-height: 1.6; }
-        .placeholder { text-align: center; padding: 60px 20px; color: rgba(255,255,255,0.3); }
-        .placeholder h2 { margin-bottom: 10px; }
+        .card h3 { color: #e94560; margin-bottom: 15px; font-size: 16px; }
+        .stat-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .stat-row:last-child { border: none; }
+        .stat-label { color: rgba(255,255,255,0.6); }
+        .stat-value { font-weight: bold; }
+        .progress-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; margin-top: 8px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+        .progress-fill.green { background: linear-gradient(90deg, #00b894, #55efc4); }
+        .progress-fill.yellow { background: linear-gradient(90deg, #fdcb6e, #f39c12); }
+        .progress-fill.red { background: linear-gradient(90deg, #e94560, #ff6b6b); }
+        .section-title { font-size: 18px; margin-bottom: 20px; color: rgba(255,255,255,0.9); }
+        .quick-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+        .quick-link { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; text-align: center; text-decoration: none; color: #fff; transition: all 0.2s; }
+        .quick-link:hover { background: rgba(233,69,96,0.2); border-color: #e94560; transform: translateY(-3px); }
+        .quick-link .icon { font-size: 32px; margin-bottom: 10px; display: block; }
+        .quick-link .name { font-size: 14px; color: rgba(255,255,255,0.8); }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; margin-right: 10px; margin-bottom: 10px; }
+        .btn-primary { background: #e94560; color: #fff; }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
+        .btn:hover { opacity: 0.8; }
+        .log-box { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 15px; font-family: monospace; font-size: 13px; max-height: 200px; overflow-y: auto; color: rgba(255,255,255,0.7); }
+        .log-entry { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .log-time { color: rgba(255,255,255,0.4); margin-right: 10px; }
     </style>
 </head>
 <body>
@@ -1322,16 +1370,118 @@ DATA_HTML = '''<!DOCTYPE html>
         <div class="logo">📊 数据模块</div>
         <div class="links">
             <a href="/data">数据</a>
+            <a href="/startpage">启动页</a>
+            <a href="/files">文件</a>
+            <a href="/notes">笔记</a>
             <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
         </div>
     </nav>
     <div class="container">
-        <div class="placeholder">
-            <h2>数据模块</h2>
-            <p>功能开发中，敬请期待...</p>
+        <div class="grid">
+            <div class="card">
+                <h3>📈 站点统计</h3>
+                <div id="stats-info">
+                    <div class="stat-row"><span class="stat-label">书签数量</span><span class="stat-value" id="bm-count">加载中...</span></div>
+                    <div class="stat-row"><span class="stat-label">笔记数量</span><span class="stat-value" id="note-count">加载中...</span></div>
+                    <div class="stat-row"><span class="stat-label">文件数量</span><span class="stat-value" id="file-count">加载中...</span></div>
+                    <div class="stat-row"><span class="stat-label">运行时间</span><span class="stat-value" id="uptime">加载中...</span></div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>💻 服务器状态</h3>
+                <div id="server-info">
+                    <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value" id="cpu">加载中...</span></div>
+                    <div class="progress-bar"><div class="progress-fill green" id="cpu-bar" style="width:0%"></div></div>
+                    <div class="stat-row"><span class="stat-label">内存</span><span class="stat-value" id="mem">加载中...</span></div>
+                    <div class="progress-bar"><div class="progress-fill green" id="mem-bar" style="width:0%"></div></div>
+                    <div class="stat-row"><span class="stat-label">磁盘</span><span class="stat-value" id="disk">加载中...</span></div>
+                    <div class="progress-bar"><div class="progress-fill green" id="disk-bar" style="width:0%"></div></div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>🔄 操作日志</h3>
+                <div class="log-box" id="log-box">
+                    <div class="log-entry"><span class="log-time">--:--</span>系统启动</div>
+                </div>
+            </div>
+        </div>
+
+        <h2 class="section-title">快捷访问</h2>
+        <div class="quick-links">
+            <a href="/" class="quick-link"><span class="icon">🏠</span><span class="name">仪表盘</span></a>
+            <a href="/startpage" class="quick-link"><span class="icon">🚀</span><span class="name">启动页</span></a>
+            <a href="/files" class="quick-link"><span class="icon">📁</span><span class="name">文件管理</span></a>
+            <a href="/notes" class="quick-link"><span class="icon">📝</span><span class="name">笔记</span></a>
+            <a href="/admin/users" class="quick-link"><span class="icon">👥</span><span class="name">用户管理</span></a>
+            <a href="/change-password" class="quick-link"><span class="icon">🔑</span><span class="name">修改密码</span></a>
+        </div>
+
+        <h2 class="section-title" style="margin-top: 30px;">数据操作</h2>
+        <div class="card">
+            <button class="btn btn-primary" onclick="exportData()">📥 导出所有数据</button>
+            <button class="btn btn-secondary" onclick="refreshAll()">🔄 刷新数据</button>
+            <div style="margin-top: 15px;">
+                <span class="stat-label">上次刷新: </span><span id="last-refresh">--</span>
+            </div>
         </div>
     </div>
+    <script>
+        function getProgressClass(percent) {
+            if (percent > 80) return 'red';
+            if (percent > 60) return 'yellow';
+            return 'green';
+        }
+        async function loadStats() {
+            try {
+                var res = await fetch('/api/data/stats');
+                var data = await res.json();
+                document.getElementById('bm-count').textContent = data.bookmarks || 0;
+                document.getElementById('note-count').textContent = data.notes || 0;
+                document.getElementById('file-count').textContent = data.files || 0;
+                document.getElementById('uptime').textContent = data.uptime || '--';
+            } catch(e) {}
+        }
+        async function loadSystem() {
+            try {
+                var res = await fetch('/api/system');
+                var data = await res.json();
+                document.getElementById('cpu').textContent = data.cpu_percent + '%';
+                document.getElementById('mem').textContent = data.memory_used_gb + 'GB / ' + data.memory_total_gb + 'GB';
+                document.getElementById('disk').textContent = data.disk_used_gb + 'GB / ' + data.disk_total_gb + 'GB';
+                var cpuBar = document.getElementById('cpu-bar');
+                cpuBar.style.width = data.cpu_percent + '%';
+                cpuBar.className = 'progress-fill ' + getProgressClass(data.cpu_percent);
+                var memBar = document.getElementById('mem-bar');
+                memBar.style.width = data.memory_percent + '%';
+                memBar.className = 'progress-fill ' + getProgressClass(data.memory_percent);
+                var diskBar = document.getElementById('disk-bar');
+                diskBar.style.width = data.disk_percent + '%';
+                diskBar.className = 'progress-fill ' + getProgressClass(data.disk_percent);
+            } catch(e) {}
+        }
+        function addLog(msg) {
+            var now = new Date();
+            var time = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+            var box = document.getElementById('log-box');
+            box.innerHTML = '<div class="log-entry"><span class="log-time">' + time + '</span>' + msg + '</div>' + box.innerHTML;
+        }
+        function exportData() {
+            window.open('/api/data/export', '_blank');
+            addLog('导出数据');
+        }
+        async function refreshAll() {
+            await loadStats();
+            await loadSystem();
+            document.getElementById('last-refresh').textContent = new Date().toLocaleString('zh-CN');
+            addLog('刷新数据');
+        }
+        loadStats();
+        loadSystem();
+        setInterval(loadSystem, 5000);
+        setInterval(loadStats, 30000);
+        document.getElementById('last-refresh').textContent = new Date().toLocaleString('zh-CN');
+    </script>
     <script>
         var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
         for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
