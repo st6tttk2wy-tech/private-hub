@@ -553,6 +553,9 @@ LOGIN_HTML = '''<!DOCTYPE html>
         .error { color: #ff6b6b; margin-bottom: 15px; font-size: 14px; }
         .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
         .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
+        @media (max-width: 480px) {
+            .login-box { width: 90%; padding: 25px; }
+        }
     </style>
 </head>
 <body>
@@ -630,6 +633,15 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         #date { text-align: center; color: rgba(255,255,255,0.5); }
         .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
         .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
+        @media (max-width: 768px) {
+            nav { flex-direction: column; gap: 10px; padding: 10px 15px; }
+            nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+            nav .links a { margin: 0; padding: 5px 10px; font-size: 12px; }
+            .container { padding: 15px; }
+            .grid { grid-template-columns: 1fr !important; }
+            .quick-links { grid-template-columns: repeat(2, 1fr) !important; }
+            #time { font-size: 32px; }
+        }
     </style>
 </head>
 <body>
@@ -989,6 +1001,14 @@ FILES_HTML = '''<!DOCTYPE html>
         .preview-btn:hover { background: #00b894; }
         .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
         .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
+        @media (max-width: 768px) {
+            nav { flex-direction: column; gap: 10px; padding: 10px 15px; }
+            nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+            nav .links a { margin: 0; padding: 5px 10px; font-size: 12px; }
+            .container { padding: 15px; }
+            .file-item { flex-wrap: wrap; gap: 8px; }
+            .file-meta { width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -1109,6 +1129,13 @@ NOTES_HTML = '''<!DOCTYPE html>
         .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
         .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
         .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
+        @media (max-width: 768px) {
+            nav { flex-direction: column; gap: 10px; padding: 10px 15px; }
+            nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+            nav .links a { margin: 0; padding: 5px 10px; font-size: 12px; }
+            .container { padding: 15px; }
+            .modal-content { width: 95% !important; padding: 20px; }
+        }
     </style>
 </head>
 <body>
@@ -1498,6 +1525,14 @@ DATA_HTML = '''<!DOCTYPE html>
         .log-box { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 15px; font-family: monospace; font-size: 13px; max-height: 200px; overflow-y: auto; color: rgba(255,255,255,0.7); }
         .log-entry { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
         .log-time { color: rgba(255,255,255,0.4); margin-right: 10px; }
+        @media (max-width: 768px) {
+            nav { flex-direction: column; gap: 10px; padding: 10px 15px; }
+            nav .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+            nav .links a { margin: 0; padding: 5px 10px; font-size: 12px; }
+            .container { padding: 15px; }
+            .grid { grid-template-columns: 1fr !important; }
+            .quick-links { grid-template-columns: repeat(2, 1fr) !important; }
+        }
     </style>
 </head>
 <body>
