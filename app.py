@@ -289,13 +289,17 @@ def login():
         if user and hash_password(password) == user.get("password_hash", ""):
             session["logged_in"] = True
             session["username"] = username
+            add_log("用户登录", f"用户 {username} 登录成功", user=username)
             return redirect(url_for("home"))
+        add_log("登录失败", f"用户 {username} 登录失败", user=username)
         error = "用户名或密码错误"
     return render_template_string(LOGIN_HTML, error=error)
 
 
 @app.route("/logout")
 def logout():
+    username = session.get("username", "unknown")
+    add_log("用户登出", f"用户 {username} 退出登录", user=username)
     session.clear()
     return redirect(url_for("login"))
 
@@ -321,6 +325,7 @@ def change_password():
         else:
             users[username]["password_hash"] = hash_password(new_password)
             save_users(users)
+            add_log("修改密码", f"用户 {username} 修改了密码", user=username)
             success = "密码修改成功"
     return render_template_string(CHANGE_PWD_HTML, error=error, success=success, nav=get_nav("password"))
 
@@ -353,6 +358,7 @@ def admin_add_user():
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     save_users(users)
+    add_log("添加用户", f"管理员添加用户 {username} (角色: {role})", user=session.get("username"))
     return jsonify({"success": True})
 
 
@@ -367,6 +373,7 @@ def admin_delete_user(username):
     if username in users:
         del users[username]
         save_users(users)
+        add_log("删除用户", f"管理员删除用户 {username}", user=session.get("username"))
     return jsonify({"success": True})
 
 
@@ -532,8 +539,10 @@ def api_delete_file(filepath):
     if file_path.is_dir():
         import shutil
         shutil.rmtree(file_path)
+        add_log("删除文件夹", f"删除文件夹: {filepath}", user=session.get("username"))
     else:
         file_path.unlink()
+        add_log("删除文件", f"删除文件: {filepath}", user=session.get("username"))
     return jsonify({"success": True})
 
 
@@ -550,6 +559,7 @@ def api_rename_file(filepath):
     if new_path.exists():
         return jsonify({"error": "文件名已存在"}), 400
     file_path.rename(new_path)
+    add_log("重命名文件", f"将 {filepath} 重命名为 {new_name}", user=session.get("username"))
     return jsonify({"success": True})
 
 
@@ -671,6 +681,7 @@ def api_create_note():
         "created": datetime.now().strftime("%Y-%m-%d %H:%M")
     })
     save_notes_index(notes_index)
+    add_log("创建笔记", f"创建笔记: {data.get('title', '无标题')}", user=session.get("username"))
     return jsonify({"success": True, "id": note_id})
 
 
@@ -678,11 +689,17 @@ def api_create_note():
 @login_required
 def api_delete_note(note_id):
     note_file = NOTES_DIR / f"{note_id}.md"
+    title = "未知"
     if note_file.exists():
         note_file.unlink()
     notes_index = load_notes_index()
+    for n in notes_index:
+        if n.get("id") == note_id:
+            title = n.get("title", "未知")
+            break
     notes_index = [n for n in notes_index if n.get("id") != note_id]
     save_notes_index(notes_index)
+    add_log("删除笔记", f"删除笔记: {title}", user=session.get("username"))
     return jsonify({"success": True})
 
 
@@ -755,6 +772,7 @@ def api_upload():
     
     save_path = FILES_DIR / file.filename
     file.save(str(save_path))
+    add_log("上传文件", f"上传文件: {file.filename}", user=session.get("username"))
     return jsonify({"success": True, "path": file.filename})
 
 
