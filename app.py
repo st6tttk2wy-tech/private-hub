@@ -668,6 +668,27 @@ for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Privat
 '''
 
 
+def get_nav(active=""):
+    user = get_current_user()
+    is_adm = user and user.get("role") == "admin"
+    links = [
+        ("/", "首页", "home"),
+        ("/startpage", "启动页", "startpage"),
+        ("/files", "文件", "files"),
+        ("/notes", "笔记", "notes"),
+        ("/change-password", "密码", "password"),
+    ]
+    if is_adm:
+        links.append(("/admin/users", "用户", "users"))
+    links.append(("/logout", "退出", "logout"))
+    html = '<nav><div class="logo">Private Hub</div><div class="links">'
+    for url, name, key in links:
+        cls = ' class="active"' if key == active else ''
+        html += f'<a href="{url}"{cls}>{name}</a>'
+    html += '</div></nav>'
+    return html
+
+
 def nav_html(active=""):
     links = [
         ("/", "首页", "home"),
