@@ -88,9 +88,9 @@ def save_users(users):
 
 def init_admin():
     users = load_users()
-    if users:
-        return
     admin_user = os.environ.get("ADMIN_USER", "001")
+    if admin_user in users:
+        return
     admin_pass = os.environ.get("ADMIN_PASS", "123456")
     users[admin_user] = {
         "password_hash": hash_password(admin_pass),
