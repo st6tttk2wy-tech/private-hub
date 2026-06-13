@@ -1129,7 +1129,7 @@ HOME_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    {{ nav }}
+    {{ nav|safe }}
     <div class="main-layout">
         <div class="sidebar">
             <div class="sidebar-title">快捷访问</div>
@@ -1226,7 +1226,7 @@ NEWS_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    {{ nav }}
+    {{ nav|safe }}
     <div class="container">
         <div class="section-header">
             <div class="section-title">📰 今日热榜</div>
@@ -1331,7 +1331,7 @@ DATA_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    {{ nav }}
+    {{ nav|safe }}
     <div class="container">
         <div class="card">
             <h2>数据操作</h2>
@@ -1389,7 +1389,7 @@ LOGS_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    {{ nav }}
+    {{ nav|safe }}
     <div class="container">
         <div class="section-title">📋 操作日志</div>
         <div class="log-list">
@@ -1474,7 +1474,7 @@ NOTES_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    {{ nav }}
+    {{ nav|safe }}
     <div class="container">
         <div style="display: flex; gap: 10px; margin-bottom: 20px;">
             <form action="/notes" method="GET" style="display: flex; gap: 10px; flex: 1;">
@@ -1618,7 +1618,7 @@ CHANGE_PWD_HTML = '''<!DOCTYPE html>
 .error{color:#ff6b6b;font-size:13px;margin-bottom:12px;}
 .success{color:#00b894;font-size:13px;margin-bottom:12px;}
 </style></head><body>
-{{ nav }}
+{{ nav|safe }}
 <div class="container"><div class="card"><h2>修改密码</h2>
 {% if error %}<div class="error">{{ error }}</div>{% endif %}{% if success %}<div class="success">{{ success }}</div>{% endif %}
 <form method="POST">
@@ -1654,7 +1654,7 @@ th{color:rgba(255,255,255,0.4);font-size:12px;text-transform:uppercase;}
 .msg.error{background:rgba(233,69,96,0.15);color:#ff6b6b;}
 .msg.success{background:rgba(0,184,148,0.15);color:#00b894;}
 </style></head><body>
-{{ nav }}
+{{ nav|safe }}
 <div class="container">
 <div class="card">
 <h2>添加用户</h2><div id="msg"></div>
@@ -1771,7 +1771,7 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
 .btn-row button{flex:1;padding:10px;border:none;border-radius:8px;cursor:pointer;font-size:13px;}
 .btn-primary{background:#e94560;color:#fff;}.btn-secondary{background:rgba(255,255,255,0.1);color:#fff;}
 </style></head><body>
-{{ nav }}
+{{ nav|safe }}
 <div class="main">
 <div class="search-box"><input type="text" placeholder="搜索或输入网址..." onkeydown="if(event.key==='Enter'){var v=this.value;if(v.startsWith('http'))window.open(v);else window.open('https://www.google.com/search?q='+v)}"></div>
 <div id="bookmarksContainer"></div>
