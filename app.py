@@ -302,6 +302,31 @@ def download(filepath):
     return send_file(file_path, as_attachment=True)
 
 
+@app.route("/preview/<path:filepath>")
+@login_required
+def preview(filepath):
+    file_path = FILES_DIR / filepath
+    if not file_path.exists() or not file_path.is_relative_to(FILES_DIR) or file_path.is_dir():
+        abort(404)
+    ext = file_path.suffix.lower()
+    text_exts = ['.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.csv', '.log', '.ini', '.cfg', '.yml', '.yaml']
+    img_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp']
+    if ext in img_exts:
+        return send_file(file_path)
+    elif ext in text_exts:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        return render_template_string(PREVIEW_TEXT_HTML, content=content, filename=filepath, ext=ext)
+    elif ext == '.pdf':
+        return send_file(file_path, mimetype='application/pdf')
+    else:
+        content = file_path.read_bytes()[:5000]
+        try:
+            text = content.decode("utf-8", errors="replace")
+            return render_template_string(PREVIEW_TEXT_HTML, content=text, filename=filepath, ext=ext)
+        except:
+            return send_file(file_path, as_attachment=True)
+
+
 @app.route("/notes")
 @login_required
 def notes():
@@ -905,6 +930,11 @@ FILES_HTML = '''<!DOCTYPE html>
             border-radius: 8px; text-decoration: none; font-size: 14px; transition: all 0.2s;
         }
         .download-btn:hover { background: #e94560; }
+        .preview-btn {
+            padding: 8px 12px; background: rgba(0,184,148,0.2); border: 1px solid rgba(0,184,148,0.5);
+            border-radius: 8px; text-decoration: none; font-size: 14px; transition: all 0.2s; margin-right: 5px;
+        }
+        .preview-btn:hover { background: #00b894; }
         .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
         .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
     </style>
@@ -948,6 +978,7 @@ FILES_HTML = '''<!DOCTYPE html>
                 </div>
                 <div class="file-meta">{{ item.modified }}{% if not item.is_dir %} | {{ "%.1f"|format(item.size / 1024) }} KB{% endif %}</div>
                 {% if not item.is_dir %}
+                <a href="/preview/{{ item.path }}" class="preview-btn" title="预览" target="_blank">👁️</a>
                 <a href="/download/{{ item.path }}" class="download-btn" title="下载">⬇️</a>
                 {% endif %}
             </div>
@@ -1324,6 +1355,42 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
             if (json.success) { alert('新密码: ' + json.password); } else { alert(json.error); }
         }
     </script>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
+</body>
+</html>'''
+
+
+PREVIEW_TEXT_HTML = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>预览 - {{ filename }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', monospace; color: #fff; }
+        .header { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 16px; color: #e94560; }
+        .header a { color: rgba(255,255,255,0.7); text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 8px; }
+        .header a:hover { background: rgba(233,69,96,0.3); }
+        .content { max-width: 1000px; margin: 30px auto; padding: 30px; background: rgba(255,255,255,0.05); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
+        pre { white-space: pre-wrap; word-wrap: break-word; line-height: 1.6; font-size: 14px; color: rgba(255,255,255,0.8); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📄 {{ filename }}</h1>
+        <div>
+            <a href="/download/{{ filename }}">下载</a>
+            <a href="/files">返回文件列表</a>
+        </div>
+    </div>
+    <div class="content">
+        <pre>{{ content }}</pre>
+    </div>
     <script>
         var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
         for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
