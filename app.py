@@ -43,6 +43,33 @@ CONFIG_FILE = CONFIG_DIR / "auth.json"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
 NOTES_INDEX = DATA_DIR / "notes_index.json"
 
+WATERMARK_CSS = '''
+.watermark {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 9999; overflow: hidden;
+}
+.watermark span {
+    position: absolute; font-size: 16px; color: rgba(255,255,255,0.03);
+    transform: rotate(-30deg); white-space: nowrap; user-select: none;
+}
+'''
+
+WATERMARK_JS = '''
+function createWatermark(text) {
+    var container = document.createElement('div');
+    container.className = 'watermark';
+    document.body.appendChild(container);
+    for (var i = 0; i < 50; i++) {
+        var span = document.createElement('span');
+        span.textContent = text;
+        span.style.left = (Math.random() * 100) + '%';
+        span.style.top = (Math.random() * 100) + '%';
+        container.appendChild(span);
+    }
+}
+createWatermark('Private Hub');
+'''
+
 
 def load_config():
     if CONFIG_FILE.exists():
@@ -334,6 +361,8 @@ LOGIN_HTML = '''<!DOCTYPE html>
         }
         .btn:hover { transform: translateY(-2px); }
         .error { color: #ff6b6b; margin-bottom: 15px; font-size: 14px; }
+        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
+        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
     </style>
 </head>
 <body>
@@ -349,6 +378,10 @@ LOGIN_HTML = '''<!DOCTYPE html>
             <button type="submit" class="btn">登录</button>
         </form>
     </div>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
 </body>
 </html>'''
 
@@ -401,6 +434,8 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         .section-title { font-size: 18px; margin-bottom: 20px; color: rgba(255,255,255,0.9); }
         #time { font-size: 48px; font-weight: 300; text-align: center; margin: 20px 0; }
         #date { text-align: center; color: rgba(255,255,255,0.5); }
+        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
+        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
     </style>
 </head>
 <body>
@@ -494,6 +529,10 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         loadSystemInfo();
         setInterval(loadSystemInfo, 5000);
     </script>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
 </body>
 </html>'''
 
@@ -568,6 +607,8 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
         .modal-content button { flex: 1; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
         .btn-primary { background: #e94560; color: #fff; }
         .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
+        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
+        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
     </style>
 </head>
 <body>
@@ -652,6 +693,10 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
         
         render();
     </script>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
 </body>
 </html>'''
 
@@ -699,6 +744,8 @@ FILES_HTML = '''<!DOCTYPE html>
             border-radius: 8px; text-decoration: none; font-size: 14px; transition: all 0.2s;
         }
         .download-btn:hover { background: #e94560; }
+        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
+        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
     </style>
 </head>
 <body>
@@ -758,6 +805,10 @@ FILES_HTML = '''<!DOCTYPE html>
             location.reload();
         }
     </script>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
 </body>
 </html>'''
 
@@ -810,6 +861,8 @@ NOTES_HTML = '''<!DOCTYPE html>
         .btn-row { display: flex; gap: 10px; }
         .btn-row button { flex: 1; padding: 12px; border: none; border-radius: 8px; cursor: pointer; }
         .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
+        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
+        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
     </style>
 </head>
 <body>
@@ -876,6 +929,10 @@ NOTES_HTML = '''<!DOCTYPE html>
             location.reload();
         }
     </script>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
 </body>
 </html>'''
 
@@ -901,6 +958,8 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
             background: rgba(255,255,255,0.05); border-radius: 12px; padding: 30px;
             white-space: pre-wrap; line-height: 1.8;
         }
+        .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
+        .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
     </style>
 </head>
 <body>
@@ -915,6 +974,10 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
     <div class="container">
         <div class="content">{{ content }}</div>
     </div>
+    <script>
+        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
+        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+    </script>
 </body>
 </html>'''
 
