@@ -669,6 +669,11 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             </div>
         </div>
         
+        <h2 class="section-title" style="margin-top: 30px;">系统监控</h2>
+        <div class="card">
+            <canvas id="usageChart" height="100"></canvas>
+        </div>
+        
         <h2 class="section-title">快捷访问</h2>
         <div class="quick-links">
             <a href="/startpage" class="quick-link"><div class="icon">🚀</div><div class="name">启动页</div></a>
@@ -678,7 +683,32 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         </div>
     </div>
     
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
+        var cpuHistory = [];
+        var memHistory = [];
+        var diskHistory = [];
+        var timeLabels = [];
+        var maxPoints = 20;
+        
+        var ctx = document.getElementById('usageChart');
+        var usageChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: timeLabels,
+                datasets: [
+                    { label: 'CPU', data: cpuHistory, borderColor: '#e94560', backgroundColor: 'rgba(233,69,96,0.1)', fill: true, tension: 0.3 },
+                    { label: '内存', data: memHistory, borderColor: '#00b894', backgroundColor: 'rgba(0,184,148,0.1)', fill: true, tension: 0.3 },
+                    { label: '磁盘', data: diskHistory, borderColor: '#fdcb6e', backgroundColor: 'rgba(253,203,110,0.1)', fill: true, tension: 0.3 }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: { y: { beginAtZero: true, max: 100, ticks: { color: 'rgba(255,255,255,0.5)' }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { ticks: { color: 'rgba(255,255,255,0.5)' }, grid: { color: 'rgba(255,255,255,0.05)' } } },
+                plugins: { legend: { labels: { color: 'rgba(255,255,255,0.7)' } } }
+            }
+        });
+
         function updateTime() {
             const now = new Date();
             document.getElementById('time').textContent = now.toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'});
@@ -718,6 +748,15 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                     <div class="stat"><span class="label">主机</span><span class="value">${data.hostname}</span></div>
                     <div class="stat"><span class="label">运行</span><span class="value">${data.uptime}</span></div>
                 `;
+                
+                var now = new Date();
+                var timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0') + ':' + now.getSeconds().toString().padStart(2,'0');
+                timeLabels.push(timeStr);
+                cpuHistory.push(data.cpu_percent);
+                memHistory.push(data.memory_percent);
+                diskHistory.push(data.disk_percent);
+                if (timeLabels.length > maxPoints) { timeLabels.shift(); cpuHistory.shift(); memHistory.shift(); diskHistory.shift(); }
+                usageChart.update();
             } catch(e) {
                 console.error('加载系统信息失败:', e);
             }
