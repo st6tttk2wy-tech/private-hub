@@ -492,6 +492,12 @@ def undo_log(log_id):
     return jsonify({"success": True})
 
 
+
+@app.route("/data")
+@login_required
+def data_module():
+    return render_template_string(DATA_HTML, nav=get_nav("data"))
+
 # ============================================================================
 # 路由 - 信息管理（新闻）
 # ============================================================================
@@ -501,7 +507,7 @@ def undo_log(log_id):
 def news_page():
     news = load_news()
     settings = load_config_settings()
-    return render_template_string(NEWS_HTML, news=news, settings=settings, sources=NEWS_SOURCES, nav=get_nav("news"))
+    return render_template_string(NEWS_HTML, news=news, settings=settings, sources=NEWS_SOURCES, nav=get_nav("news"), is_admin=is_admin)
 
 
 @app.route("/api/news/refresh", methods=["POST"])
@@ -966,10 +972,10 @@ WATERMARK_CSS = '''
 .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
 '''
 
-WATERMARK_JS = '''
+WATERMARK_JS = """
 var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
 for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
-'''
+""" 
 
 
 def nav_html(active=""):
