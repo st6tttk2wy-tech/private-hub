@@ -127,15 +127,6 @@ def files(filepath=None):
     
     if base_path.is_file():
         return send_file(base_path)
-
-
-@app.route("/download/<path:filepath>")
-@login_required
-def download(filepath):
-    file_path = FILES_DIR / filepath
-    if not file_path.exists() or not file_path.is_relative_to(FILES_DIR) or file_path.is_dir():
-        abort(404)
-    return send_file(file_path, as_attachment=True)
     
     items = []
     for item in sorted(base_path.iterdir()):
@@ -149,6 +140,15 @@ def download(filepath):
         })
     
     return render_template_string(FILES_HTML, items=items, current_path=filepath)
+
+
+@app.route("/download/<path:filepath>")
+@login_required
+def download(filepath):
+    file_path = FILES_DIR / filepath
+    if not file_path.exists() or not file_path.is_relative_to(FILES_DIR) or file_path.is_dir():
+        abort(404)
+    return send_file(file_path, as_attachment=True)
 
 
 @app.route("/notes")
