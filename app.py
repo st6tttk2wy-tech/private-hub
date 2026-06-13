@@ -1006,17 +1006,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">Private Hub</div>
-        <div class="links">
-            <a href="/">首页</a>
-            <a href="/files">文件</a>
-            <a href="/notes">笔记</a>
-            <a href="/admin/users">用户管理</a>
-            <a href="/change-password">修改密码</a>
-            <a href="/logout">退出</a>
-        </div>
-    </nav>
+    {{ nav|safe }}
     <div class="main-layout">
         <div class="sidebar">
             <div class="sidebar-title">快捷访问</div>
