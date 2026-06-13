@@ -599,6 +599,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         <div class="logo">🏠 私密中心</div>
         <div class="links">
             <a href="/">仪表盘</a>
+            <a href="/data">数据</a>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
@@ -774,6 +775,7 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
         <div class="logo">🚀 启动页</div>
         <div class="links">
             <a href="/">仪表盘</a>
+            <a href="/data">数据</a>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
@@ -912,6 +914,7 @@ FILES_HTML = '''<!DOCTYPE html>
         <div class="logo">📁 文件管理</div>
         <div class="links">
             <a href="/">仪表盘</a>
+            <a href="/data">数据</a>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
@@ -1030,6 +1033,7 @@ NOTES_HTML = '''<!DOCTYPE html>
         <div class="logo">📝 笔记</div>
         <div class="links">
             <a href="/">仪表盘</a>
+            <a href="/data">数据</a>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
@@ -1129,6 +1133,7 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
         <div class="links">
             <a href="/notes">返回列表</a>
             <a href="/">仪表盘</a>
+            <a href="/data">数据</a>
             <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
         </div>
@@ -1173,7 +1178,9 @@ CHANGE_PWD_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">🔑 修改密码</div>
         <div class="links">
-            <a href="/">返回</a>
+            <a href="/">仪表盘</a>
+            <a href="/data">数据</a>
+            <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
         </div>
     </nav>
@@ -1244,6 +1251,8 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
         <div class="logo">👥 用户管理</div>
         <div class="links">
             <a href="/">仪表盘</a>
+            <a href="/data">数据</a>
+            <a href="/admin/users">用户管理</a>
             <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
         </div>
@@ -1369,6 +1378,7 @@ DATA_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">📊 数据模块</div>
         <div class="links">
+            <a href="/">仪表盘</a>
             <a href="/data">数据</a>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
