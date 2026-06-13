@@ -513,6 +513,17 @@ def api_rename_note(note_id):
     return jsonify({"success": True})
 
 
+@app.route("/api/notes/<note_id>/edit", methods=["POST"])
+@login_required
+def api_edit_note(note_id):
+    note_file = NOTES_DIR / f"{note_id}.md"
+    if not note_file.exists():
+        return jsonify({"error": "笔记不存在"}), 404
+    content = request.json.get("content", "")
+    note_file.write_text(content, encoding="utf-8")
+    return jsonify({"success": True})
+
+
 @app.route("/api/notes/<note_id>/share", methods=["POST"])
 @login_required
 def api_share_note(note_id):
@@ -610,6 +621,28 @@ def api_data_export():
     return jsonify(data), 200, {
         "Content-Disposition": "attachment; filename=private_hub_export.json"
     }
+
+
+@app.route("/api/data/import", methods=["POST"])
+@login_required
+def api_data_import():
+    data = request.json
+    if not data:
+        return jsonify({"error": "无效的数据"}), 400
+    
+    if "bookmarks" in data:
+        save_bookmarks(data["bookmarks"])
+    
+    if "notes" in data:
+        for note in data["notes"]:
+            note_id = note.get("id")
+            if note_id:
+                note_file = NOTES_DIR / f"{note_id}.md"
+                if not note_file.exists():
+                    note_file.write_text(note.get("content", ""), encoding="utf-8")
+        save_notes_index(data["notes"])
+    
+    return jsonify({"success": True})
 
 
 # ============================================================================
@@ -730,7 +763,20 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         nav .logo { font-size: 20px; font-weight: bold; }
         nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; transition: color 0.2s; }
         nav .links a:hover { color: #e94560; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 30px; }
+        .main-layout { display: flex; min-height: calc(100vh - 60px); }
+        .sidebar {
+            width: 200px; background: rgba(255,255,255,0.03); border-right: 1px solid rgba(255,255,255,0.08);
+            padding: 20px 15px; flex-shrink: 0;
+        }
+        .sidebar-title { font-size: 12px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 15px; }
+        .sidebar-link {
+            display: flex; align-items: center; gap: 10px; padding: 12px 15px; margin-bottom: 5px;
+            border-radius: 10px; text-decoration: none; color: rgba(255,255,255,0.7);
+            transition: all 0.2s; font-size: 14px;
+        }
+        .sidebar-link:hover { background: rgba(233,69,96,0.15); color: #fff; }
+        .sidebar-link .icon { font-size: 18px; }
+        .container { flex: 1; padding: 30px; overflow-y: auto; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .card {
             background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
@@ -747,15 +793,6 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         .progress-fill.green { background: linear-gradient(90deg, #00b894, #55efc4); }
         .progress-fill.yellow { background: linear-gradient(90deg, #fdcb6e, #f39c12); }
         .progress-fill.red { background: linear-gradient(90deg, #e94560, #ff6b6b); }
-        .quick-links { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
-        .quick-link {
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 12px; padding: 20px; text-align: center; text-decoration: none; color: #fff;
-            transition: all 0.2s;
-        }
-        .quick-link:hover { background: rgba(233,69,96,0.2); border-color: #e94560; }
-        .quick-link .icon { font-size: 32px; margin-bottom: 10px; }
-        .quick-link .name { font-size: 14px; color: rgba(255,255,255,0.8); }
         .section-title { font-size: 18px; margin-bottom: 20px; color: rgba(255,255,255,0.9); }
         #time { font-size: 48px; font-weight: 300; text-align: center; margin: 20px 0; }
         #date { text-align: center; color: rgba(255,255,255,0.5); }
@@ -767,8 +804,9 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         .data-card .icon { font-size: 28px; margin-bottom: 8px; }
         .data-card .count { font-size: 24px; font-weight: bold; color: #e94560; }
         .data-card .label { font-size: 12px; color: rgba(255,255,255,0.5); }
-        .export-btn { padding: 10px 20px; background: rgba(0,184,148,0.2); border: 1px solid rgba(0,184,148,0.5); border-radius: 8px; color: #fff; cursor: pointer; font-size: 13px; transition: all 0.2s; }
-        .export-btn:hover { background: #00b894; }
+        .log-box { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 15px; font-family: monospace; font-size: 13px; max-height: 200px; overflow-y: auto; color: rgba(255,255,255,0.7); }
+        .log-entry { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .log-time { color: rgba(255,255,255,0.4); margin-right: 10px; }
         .chart-card { grid-column: span 2; }
         .watermark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; overflow: hidden; }
         .watermark span { position: absolute; font-size: 16px; color: rgba(255,255,255,0.03); transform: rotate(-30deg); white-space: nowrap; user-select: none; }
@@ -776,10 +814,9 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 </head>
 <body>
     <nav>
-        <div class="logo">🏠 私密中心</div>
+        <div class="logo">Private Hub</div>
         <div class="links">
             <a href="/">首页</a>
-            <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
             <a href="/admin/users">用户管理</a>
@@ -787,47 +824,54 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             <a href="/logout">退出</a>
         </div>
     </nav>
-    <div class="container">
-        <div id="time"></div>
-        <div id="date"></div>
-        
-        <div class="data-row" style="margin-top: 30px;">
-            <div class="data-card"><div class="icon">🔗</div><div class="count" id="bm-val">--</div><div class="label">书签</div></div>
-            <div class="data-card"><div class="icon">📝</div><div class="count" id="note-val">--</div><div class="label">笔记</div></div>
-            <div class="data-card"><div class="icon">📁</div><div class="count" id="file-val">--</div><div class="label">文件</div></div>
+    <div class="main-layout">
+        <div class="sidebar">
+            <div class="sidebar-title">快捷访问</div>
+            <a href="/startpage" class="sidebar-link"><span class="icon">🚀</span>启动页</a>
+            <a href="/files" class="sidebar-link"><span class="icon">📁</span>文件管理</a>
+            <a href="/notes" class="sidebar-link"><span class="icon">📝</span>笔记</a>
+            <a href="/change-password" class="sidebar-link"><span class="icon">🔑</span>修改密码</a>
+            <a href="/admin/users" class="sidebar-link"><span class="icon">👥</span>用户管理</a>
+            <a href="/data" class="sidebar-link"><span class="icon">📊</span>数据操作</a>
         </div>
-        
-        <div class="grid">
-            <div class="card">
-                <h3>💻 CPU</h3>
-                <div id="cpu-info">加载中...</div>
+        <div class="container">
+            <div id="time"></div>
+            <div id="date"></div>
+            
+            <div class="data-row" style="margin-top: 30px;">
+                <div class="data-card"><div class="icon">🔗</div><div class="count" id="bm-val">--</div><div class="label">书签</div></div>
+                <div class="data-card"><div class="icon">📝</div><div class="count" id="note-val">--</div><div class="label">笔记</div></div>
+                <div class="data-card"><div class="icon">📁</div><div class="count" id="file-val">--</div><div class="label">文件</div></div>
             </div>
-            <div class="card">
-                <h3>🧠 内存</h3>
-                <div id="mem-info">加载中...</div>
+            
+            <div class="grid">
+                <div class="card">
+                    <h3>💻 CPU</h3>
+                    <div id="cpu-info">加载中...</div>
+                </div>
+                <div class="card">
+                    <h3>🧠 内存</h3>
+                    <div id="mem-info">加载中...</div>
+                </div>
+                <div class="card">
+                    <h3>💾 磁盘</h3>
+                    <div id="disk-info">加载中...</div>
+                </div>
+                <div class="card">
+                    <h3>ℹ️ 系统</h3>
+                    <div id="sys-info">加载中...</div>
+                </div>
+                <div class="card chart-card">
+                    <h3>📊 系统监控</h3>
+                    <canvas id="usageChart" height="120"></canvas>
+                </div>
+                <div class="card">
+                    <h3>📋 操作日志</h3>
+                    <div class="log-box" id="log-box">
+                        <div class="log-entry"><span class="log-time">--:--</span>系统启动</div>
+                    </div>
+                </div>
             </div>
-            <div class="card">
-                <h3>💾 磁盘</h3>
-                <div id="disk-info">加载中...</div>
-            </div>
-            <div class="card">
-                <h3>ℹ️ 系统</h3>
-                <div id="sys-info">加载中...</div>
-            </div>
-            <div class="card chart-card">
-                <h3>📊 系统监控</h3>
-                <canvas id="usageChart" height="120"></canvas>
-            </div>
-        </div>
-        
-        <h2 class="section-title">快捷访问</h2>
-        <div class="quick-links">
-            <a href="/startpage" class="quick-link"><div class="icon">🚀</div><div class="name">启动页</div></a>
-            <a href="/files" class="quick-link"><div class="icon">📁</div><div class="name">文件管理</div></a>
-            <a href="/notes" class="quick-link"><div class="icon">📝</div><div class="name">笔记</div></a>
-            <a href="/change-password" class="quick-link"><div class="icon">🔑</div><div class="name">修改密码</div></a>
-            <a href="/admin/users" class="quick-link"><div class="icon">👥</div><div class="name">用户管理</div></a>
-            <a href="#" class="quick-link" onclick="exportData()"><div class="icon">📥</div><div class="name">导出数据</div></a>
         </div>
     </div>
     
@@ -845,6 +889,13 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             if (percent > 80) return 'red';
             if (percent > 60) return 'yellow';
             return 'green';
+        }
+        
+        function addLog(msg) {
+            var now = new Date();
+            var time = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+            var box = document.getElementById('log-box');
+            box.innerHTML = '<div class="log-entry"><span class="log-time">' + time + '</span>' + msg + '</div>' + box.innerHTML;
         }
         
         var cpuH=[], memH=[], diskH=[], labels=[];
@@ -907,12 +958,11 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             } catch(e) {}
         }
         
-        function exportData() { window.open('/api/data/export', '_blank'); }
-        
         loadSystemInfo();
         loadStats();
         setInterval(loadSystemInfo, 5000);
         setInterval(loadStats, 30000);
+        addLog('加载首页');
     </script>
     <script>
         var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
@@ -1000,7 +1050,7 @@ STARTPAGE_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">🚀 启动页</div>
         <div class="links">
-            <a href="/">仪表盘</a>
+            <a href="/">首页</a>
             <a href="/data">数据</a>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
@@ -1156,7 +1206,7 @@ FILES_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">📁 文件管理</div>
         <div class="links">
-            <a href="/">仪表盘</a>
+            <a href="/">首页</a>
             <a href="/data">数据</a>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
@@ -1339,7 +1389,7 @@ NOTES_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">📝 笔记</div>
         <div class="links">
-            <a href="/">仪表盘</a>
+            <a href="/">首页</a>
             <a href="/data">数据</a>
             <a href="/startpage">启动页</a>
             <a href="/files">文件</a>
@@ -1368,6 +1418,7 @@ NOTES_HTML = '''<!DOCTYPE html>
                     <span>{{ note.created }}</span>
                     <div>
                         <a href="/notes/{{ note.id }}" class="action-btn">预览</a>
+                        <button class="action-btn" onclick="editNote('{{ note.id }}')">编辑</button>
                         <a href="/api/notes/{{ note.id }}/download" class="action-btn">下载</a>
                         <button class="action-btn" onclick="renameNote('{{ note.id }}', '{{ note.title }}')">重命名</button>
                         <button class="action-btn" onclick="shareNote('{{ note.id }}')">分享</button>
@@ -1410,6 +1461,17 @@ NOTES_HTML = '''<!DOCTYPE html>
             <div class="btn-row" style="margin-top:12px">
                 <button class="btn-primary" onclick="copyShare()">复制链接</button>
                 <button class="btn-secondary" onclick="closeModal('shareModal')">关闭</button>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="editModal">
+        <div class="modal-content">
+            <h3>编辑笔记</h3>
+            <input type="hidden" id="editNoteId">
+            <textarea id="editContent" placeholder="内容 (支持 Markdown)" style="min-height:300px"></textarea>
+            <div class="btn-row">
+                <button class="btn-secondary" onclick="closeModal('editModal')">取消</button>
+                <button class="btn-primary" onclick="saveEdit()">保存</button>
             </div>
         </div>
     </div>
@@ -1480,6 +1542,31 @@ NOTES_HTML = '''<!DOCTYPE html>
             navigator.clipboard.writeText(document.getElementById('shareUrl').textContent);
             alert('已复制');
         }
+        
+        async function editNote(id) {
+            document.getElementById('editNoteId').value = id;
+            try {
+                var r = await fetch('/notes/' + id);
+                var html = await r.text();
+                var match = html.match(/<div class="content">([\s\S]*?)<\/div>/);
+                if (match) {
+                    document.getElementById('editContent').value = match[1].trim();
+                }
+            } catch(e) {}
+            openModal('editModal');
+        }
+        
+        async function saveEdit() {
+            var id = document.getElementById('editNoteId').value;
+            var content = document.getElementById('editContent').value;
+            await fetch('/api/notes/' + id + '/edit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({content: content})
+            });
+            closeModal('editModal');
+            location.reload();
+        }
     </script>
     <script>
         var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
@@ -1539,7 +1626,7 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
         <div class="logo">📝 笔记详情</div>
         <div class="links">
             <a href="/notes">返回列表</a>
-            <a href="/">仪表盘</a>
+            <a href="/">首页</a>
             <a href="/data">数据</a>
             <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
@@ -1549,6 +1636,7 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
         <div class="note-header">
             <div class="note-title">{{ title }}</div>
             <div class="note-actions">
+                <button class="action-btn" onclick="editNote()">编辑</button>
                 <a href="/api/notes/{{ note_id }}/download" class="action-btn">下载</a>
                 <button class="action-btn" onclick="renameNote()">重命名</button>
                 <button class="action-btn" onclick="shareNote()">分享</button>
@@ -1578,6 +1666,16 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
             </div>
         </div>
     </div>
+    <div class="modal" id="editModal">
+        <div class="modal-box" style="width:600px">
+            <h3>编辑笔记</h3>
+            <textarea id="editContent" style="width:100%;min-height:300px;padding:12px;border:1px solid rgba(255,255,255,0.2);border-radius:8px;background:rgba(255,255,255,0.1);color:#fff;font-size:14px;font-family:monospace;resize:vertical;">{{ content }}</textarea>
+            <div class="btn-row" style="margin-top:12px">
+                <button class="btn-secondary" onclick="closeModal('editModal')">取消</button>
+                <button class="btn-primary" onclick="saveEdit()">保存</button>
+            </div>
+        </div>
+    </div>
     
     <script>
         function openModal(id) { document.getElementById(id).classList.add('active'); }
@@ -1588,6 +1686,7 @@ NOTE_DETAIL_HTML = '''<!DOCTYPE html>
             window.location = '/notes';
         }
         function renameNote() { openModal('renameModal'); }
+        function editNote() { openModal('editModal'); }
         async function doRename() {
             var title = document.getElementById('newTitle').value;
             await fetch('/api/notes/{{ note_id }}/rename', {
@@ -1646,7 +1745,7 @@ CHANGE_PWD_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">🔑 修改密码</div>
         <div class="links">
-            <a href="/">仪表盘</a>
+            <a href="/">首页</a>
             <a href="/data">数据</a>
             <a href="/change-password">修改密码</a>
             <a href="/logout">退出</a>
@@ -1718,7 +1817,7 @@ ADMIN_USERS_HTML = '''<!DOCTYPE html>
     <nav>
         <div class="logo">👥 用户管理</div>
         <div class="links">
-            <a href="/">仪表盘</a>
+            <a href="/">首页</a>
             <a href="/data">数据</a>
             <a href="/admin/users">用户管理</a>
             <a href="/change-password">修改密码</a>
@@ -1805,7 +1904,7 @@ DATA_HTML = '''<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数据模块 - 私密中心</title>
+    <title>数据操作 - 私密中心</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
@@ -1813,42 +1912,21 @@ DATA_HTML = '''<!DOCTYPE html>
         nav .logo { font-size: 20px; font-weight: bold; }
         nav .links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 25px; }
         nav .links a:hover { color: #e94560; }
-        .container { max-width: 1200px; margin: 30px auto; padding: 30px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 25px; transition: transform 0.2s; }
-        .card:hover { transform: translateY(-3px); border-color: rgba(233,69,96,0.5); }
-        .card h3 { color: #e94560; margin-bottom: 15px; font-size: 16px; }
-        .stat-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .stat-row:last-child { border: none; }
-        .stat-label { color: rgba(255,255,255,0.6); }
-        .stat-value { font-weight: bold; }
-        .progress-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; margin-top: 8px; overflow: hidden; }
-        .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
-        .progress-fill.green { background: linear-gradient(90deg, #00b894, #55efc4); }
-        .progress-fill.yellow { background: linear-gradient(90deg, #fdcb6e, #f39c12); }
-        .progress-fill.red { background: linear-gradient(90deg, #e94560, #ff6b6b); }
-        .section-title { font-size: 18px; margin-bottom: 20px; color: rgba(255,255,255,0.9); }
-        .quick-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
-        .quick-link { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; text-align: center; text-decoration: none; color: #fff; transition: all 0.2s; }
-        .quick-link:hover { background: rgba(233,69,96,0.2); border-color: #e94560; transform: translateY(-3px); }
-        .quick-link .icon { font-size: 32px; margin-bottom: 10px; display: block; }
-        .quick-link .name { font-size: 14px; color: rgba(255,255,255,0.8); }
-        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; margin-right: 10px; margin-bottom: 10px; }
+        .container { max-width: 600px; margin: 50px auto; padding: 30px; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 30px; }
+        .card h2 { color: #e94560; margin-bottom: 20px; font-size: 18px; }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; margin-right: 10px; margin-bottom: 10px; transition: all 0.2s; }
         .btn-primary { background: #e94560; color: #fff; }
         .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
-        .btn:hover { opacity: 0.8; }
-        .log-box { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 15px; font-family: monospace; font-size: 13px; max-height: 200px; overflow-y: auto; color: rgba(255,255,255,0.7); }
-        .log-entry { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .log-time { color: rgba(255,255,255,0.4); margin-right: 10px; }
+        .btn:hover { opacity: 0.8; transform: translateY(-1px); }
+        .info { margin-top: 15px; color: rgba(255,255,255,0.4); font-size: 13px; }
     </style>
 </head>
 <body>
     <nav>
-        <div class="logo">📊 数据模块</div>
+        <div class="logo">📊 数据操作</div>
         <div class="links">
-            <a href="/">仪表盘</a>
-            <a href="/data">数据</a>
-            <a href="/startpage">启动页</a>
+            <a href="/">首页</a>
             <a href="/files">文件</a>
             <a href="/notes">笔记</a>
             <a href="/change-password">修改密码</a>
@@ -1856,113 +1934,46 @@ DATA_HTML = '''<!DOCTYPE html>
         </div>
     </nav>
     <div class="container">
-        <div class="grid">
-            <div class="card">
-                <h3>📈 站点统计</h3>
-                <div id="stats-info">
-                    <div class="stat-row"><span class="stat-label">书签数量</span><span class="stat-value" id="bm-count">加载中...</span></div>
-                    <div class="stat-row"><span class="stat-label">笔记数量</span><span class="stat-value" id="note-count">加载中...</span></div>
-                    <div class="stat-row"><span class="stat-label">文件数量</span><span class="stat-value" id="file-count">加载中...</span></div>
-                    <div class="stat-row"><span class="stat-label">运行时间</span><span class="stat-value" id="uptime">加载中...</span></div>
-                </div>
-            </div>
-            <div class="card">
-                <h3>💻 服务器状态</h3>
-                <div id="server-info">
-                    <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value" id="cpu">加载中...</span></div>
-                    <div class="progress-bar"><div class="progress-fill green" id="cpu-bar" style="width:0%"></div></div>
-                    <div class="stat-row"><span class="stat-label">内存</span><span class="stat-value" id="mem">加载中...</span></div>
-                    <div class="progress-bar"><div class="progress-fill green" id="mem-bar" style="width:0%"></div></div>
-                    <div class="stat-row"><span class="stat-label">磁盘</span><span class="stat-value" id="disk">加载中...</span></div>
-                    <div class="progress-bar"><div class="progress-fill green" id="disk-bar" style="width:0%"></div></div>
-                </div>
-            </div>
-            <div class="card">
-                <h3>🔄 操作日志</h3>
-                <div class="log-box" id="log-box">
-                    <div class="log-entry"><span class="log-time">--:--</span>系统启动</div>
-                </div>
-            </div>
-        </div>
-
-        <h2 class="section-title">快捷访问</h2>
-        <div class="quick-links">
-            <a href="/" class="quick-link"><span class="icon">🏠</span><span class="name">仪表盘</span></a>
-            <a href="/startpage" class="quick-link"><span class="icon">🚀</span><span class="name">启动页</span></a>
-            <a href="/files" class="quick-link"><span class="icon">📁</span><span class="name">文件管理</span></a>
-            <a href="/notes" class="quick-link"><span class="icon">📝</span><span class="name">笔记</span></a>
-            <a href="/admin/users" class="quick-link"><span class="icon">👥</span><span class="name">用户管理</span></a>
-            <a href="/change-password" class="quick-link"><span class="icon">🔑</span><span class="name">修改密码</span></a>
-        </div>
-
-        <h2 class="section-title" style="margin-top: 30px;">数据操作</h2>
         <div class="card">
+            <h2>数据操作</h2>
             <button class="btn btn-primary" onclick="exportData()">📥 导出所有数据</button>
-            <button class="btn btn-secondary" onclick="refreshAll()">🔄 刷新数据</button>
-            <div style="margin-top: 15px;">
-                <span class="stat-label">上次刷新: </span><span id="last-refresh">--</span>
+            <button class="btn btn-secondary" onclick="importData()">📤 导入数据</button>
+            <input type="file" id="importFile" accept=".json" style="display:none" onchange="doImport(this)">
+            <div class="info">
+                <p>导出：将书签和笔记数据导出为JSON文件</p>
+                <p>导入：从JSON文件恢复数据</p>
             </div>
         </div>
     </div>
     <script>
-        function getProgressClass(percent) {
-            if (percent > 80) return 'red';
-            if (percent > 60) return 'yellow';
-            return 'green';
-        }
-        async function loadStats() {
-            try {
-                var res = await fetch('/api/data/stats');
-                var data = await res.json();
-                document.getElementById('bm-count').textContent = data.bookmarks || 0;
-                document.getElementById('note-count').textContent = data.notes || 0;
-                document.getElementById('file-count').textContent = data.files || 0;
-                document.getElementById('uptime').textContent = data.uptime || '--';
-            } catch(e) {}
-        }
-        async function loadSystem() {
-            try {
-                var res = await fetch('/api/system');
-                var data = await res.json();
-                document.getElementById('cpu').textContent = data.cpu_percent + '%';
-                document.getElementById('mem').textContent = data.memory_used_gb + 'GB / ' + data.memory_total_gb + 'GB';
-                document.getElementById('disk').textContent = data.disk_used_gb + 'GB / ' + data.disk_total_gb + 'GB';
-                var cpuBar = document.getElementById('cpu-bar');
-                cpuBar.style.width = data.cpu_percent + '%';
-                cpuBar.className = 'progress-fill ' + getProgressClass(data.cpu_percent);
-                var memBar = document.getElementById('mem-bar');
-                memBar.style.width = data.memory_percent + '%';
-                memBar.className = 'progress-fill ' + getProgressClass(data.memory_percent);
-                var diskBar = document.getElementById('disk-bar');
-                diskBar.style.width = data.disk_percent + '%';
-                diskBar.className = 'progress-fill ' + getProgressClass(data.disk_percent);
-            } catch(e) {}
-        }
-        function addLog(msg) {
-            var now = new Date();
-            var time = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-            var box = document.getElementById('log-box');
-            box.innerHTML = '<div class="log-entry"><span class="log-time">' + time + '</span>' + msg + '</div>' + box.innerHTML;
-        }
         function exportData() {
             window.open('/api/data/export', '_blank');
-            addLog('导出数据');
         }
-        async function refreshAll() {
-            await loadStats();
-            await loadSystem();
-            document.getElementById('last-refresh').textContent = new Date().toLocaleString('zh-CN');
-            addLog('刷新数据');
+        function importData() {
+            document.getElementById('importFile').click();
         }
-        loadStats();
-        loadSystem();
-        setInterval(loadSystem, 5000);
-        setInterval(loadStats, 30000);
-        document.getElementById('last-refresh').textContent = new Date().toLocaleString('zh-CN');
-    </script>
-    <script>
-        var c=document.createElement('div');c.className='watermark';document.body.appendChild(c);
-        for(var i=0;i<50;i++){var s=document.createElement('span');s.textContent='Private Hub';s.style.left=(Math.random()*100)+'%';s.style.top=(Math.random()*100)+'%';c.appendChild(s);}
+        async function doImport(input) {
+            var file = input.files[0];
+            if (!file) return;
+            var text = await file.text();
+            try {
+                var data = JSON.parse(text);
+                var r = await fetch('/api/data/import', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                var d = await r.json();
+                if (d.success) {
+                    alert('导入成功');
+                    location.reload();
+                } else {
+                    alert('导入失败: ' + (d.error || '未知错误'));
+                }
+            } catch(e) {
+                alert('文件格式错误');
+            }
+        }
     </script>
 </body>
 </html>'''
