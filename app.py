@@ -59,12 +59,103 @@ CONFIG_SETTINGS_FILE = CONFIG_DIR / "settings.json"
 NEWS_SOURCES = {
     "weibo": {"name": "微博", "icon": "🔥", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=KqndgxeLl9"},
     "douyin": {"name": "抖音", "icon": "🎵", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=Jb0vmloB1G"},
-    "toutiao": {"name": "今日头条", "icon": "📰", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=3JLVqRhQPO"},
+    "toutiao": {"name": "今日头条", "icon": "📰", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=3JLVqRhQPO", "scraper": "toutiao"},
     "zhihu": {"name": "知乎", "icon": "💡", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=mproPpoq6O"},
-    "bilibili": {"name": "B站", "icon": "📺", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=0R9ABmpbMG"},
-    "baidu": {"name": "百度", "icon": "🔍", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=wwK7FNBZ9D"},
-    "xiaohongshu": {"name": "小红书", "icon": "📕", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=TyVJ7QMbOK"},
-    "qq-news": {"name": "今日资讯", "icon": "📢", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=TKYDG2E6gG"},
+    "bilibili": {"name": "B站", "icon": "📺", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=0R9ABmpbMG", "scraper": "bilibili"},
+    "baidu": {"name": "百度", "icon": "🔍", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=wwK7FNBZ9D", "scraper": "baidu"},
+    "xiaohongshu": {"name": "小红书", "icon": "📕", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=TyVJ7QMbOK", "scraper": "xiaohongshu"},
+    "qq-news": {"name": "今日资讯", "icon": "📢", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=TKYDG2E6gG", "scraper": "qq_news"},
+}
+
+SCRAPER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+
+def scrape_toutiao():
+    items = []
+    try:
+        resp = requests.get("https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc",
+                            headers=SCRAPER_HEADERS, timeout=10)
+        data = resp.json()
+        for item in data.get("data", [])[:20]:
+            title = item.get("Title", "")
+            url = item.get("Url", "")
+            hot = item.get("HotValue", "")
+            if title:
+                items.append({"title": title, "url": url, "hot": str(hot), "desc": ""})
+    except Exception as e:
+        print(f"  [今日头条爬虫] 失败: {e}")
+    return items
+
+def scrape_bilibili():
+    items = []
+    try:
+        resp = requests.get("https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all",
+                            headers=SCRAPER_HEADERS, timeout=10)
+        data = resp.json()
+        for item in data.get("data", {}).get("list", [])[:20]:
+            title = item.get("title", "")
+            url = "https://www.bilibili.com/video/" + item.get("bvid", "")
+            hot = item.get("stat", {}).get("view", 0)
+            desc = item.get("desc", "")[:80]
+            if title:
+                items.append({"title": title, "url": url, "hot": str(hot) + "播放", "desc": desc})
+    except Exception as e:
+        print(f"  [B站爬虫] 失败: {e}")
+    return items
+
+def scrape_baidu():
+    items = []
+    try:
+        resp = requests.get("https://top.baidu.com/board?tab=realtime",
+                            headers=SCRAPER_HEADERS, timeout=10)
+        import re
+        titles = re.findall(r'class="title_.*?".*?>(.*?)<', resp.text)
+        for i, title in enumerate(titles[:20]):
+            title = title.strip()
+            if title:
+                items.append({"title": title, "url": "https://www.baidu.com/s?wd=" + title, "hot": "", "desc": ""})
+    except Exception as e:
+        print(f"  [百度爬虫] 失败: {e}")
+    return items
+
+def scrape_xiaohongshu():
+    items = []
+    try:
+        resp = requests.get("https://edith.xiaohongshu.com/api/sns/v1/search/hot_list",
+                            headers=SCRAPER_HEADERS, timeout=10)
+        data = resp.json()
+        for item in data.get("data", [])[:20]:
+            title = item.get("title", "")
+            if title:
+                items.append({"title": title, "url": "https://www.xiaohongshu.com/search_result?keyword=" + title, "hot": "", "desc": ""})
+    except Exception as e:
+        print(f"  [小红书爬虫] 失败: {e}")
+    return items
+
+def scrape_qq_news():
+    items = []
+    try:
+        resp = requests.get("https://i.news.qq.com/trpc.qqnews_web.kv_srv.kv_srv_http/list?sub_srv_id=24hours&srv_id=pc&offset=0&limit=20&strategy=1&ext=%7B%22pool%22%3A%5B%22top%22%5D%2C%22LastRecordTime%22%3A0%7D",
+                            headers=SCRAPER_HEADERS, timeout=10)
+        data = resp.json()
+        for item in data.get("data", {}).get("list", [])[:20]:
+            title = item.get("title", "")
+            url = item.get("url", "")
+            if title:
+                items.append({"title": title, "url": url, "hot": "", "desc": ""})
+    except Exception as e:
+        print(f"  [今日资讯爬虫] 失败: {e}")
+    return items
+
+SCRAPERS = {
+    "toutiao": scrape_toutiao,
+    "bilibili": scrape_bilibili,
+    "baidu": scrape_baidu,
+    "xiaohongshu": scrape_xiaohongshu,
+    "qq_news": scrape_qq_news,
 }
 
 WATERMARK_CSS = '''
@@ -148,6 +239,8 @@ def fetch_news():
     print("开始收集新闻...")
     all_news = {}
     for source_id, source in NEWS_SOURCES.items():
+        items = []
+        # 先尝试API
         try:
             resp = requests.get(source["api"], timeout=10, headers={"User-Agent": "Mozilla/5.0"})
             if resp.status_code == 200:
@@ -157,24 +250,35 @@ def fetch_news():
                     raw_items = data.get("data", [])
                 elif data.get("code") == 200:
                     raw_items = data.get("data", [])
-                if raw_items:
-                    items = []
-                    for item in raw_items[:20]:
-                        items.append({
-                            "title": item.get("title", ""),
-                            "url": item.get("link", item.get("url", "#")),
-                            "hot": item.get("hotValue", item.get("hot", "")),
-                            "desc": item.get("desc", "")
-                        })
-                    all_news[source_id] = {
-                        "name": source["name"],
-                        "icon": source["icon"],
-                        "items": items,
-                        "updated": datetime.now().strftime("%Y-%m-%d %H:%M")
-                    }
-                    print(f"  [{source['name']}] 获取 {len(items)} 条")
+                for item in raw_items[:20]:
+                    items.append({
+                        "title": item.get("title", ""),
+                        "url": item.get("link", item.get("url", "#")),
+                        "hot": item.get("hotValue", item.get("hot", "")),
+                        "desc": item.get("desc", "")
+                    })
         except Exception as e:
-            print(f"  [{source['name']}] 失败: {e}")
+            print(f"  [{source['name']}] API失败: {e}")
+
+        # API无数据时尝试爬虫
+        if not items and source.get("scraper") and source["scraper"] in SCRAPERS:
+            print(f"  [{source['name']}] 尝试爬虫...")
+            try:
+                items = SCRAPERS[source["scraper"]]()
+                if items:
+                    print(f"  [{source['name']}] 爬虫获取 {len(items)} 条")
+            except Exception as e:
+                print(f"  [{source['name']}] 爬虫失败: {e}")
+
+        if items:
+            all_news[source_id] = {
+                "name": source["name"],
+                "icon": source["icon"],
+                "items": items[:20],
+                "updated": datetime.now().strftime("%Y-%m-%d %H:%M")
+            }
+            print(f"  [{source['name']}] 共获取 {len(items[:20])} 条")
+
     if all_news:
         save_news(all_news)
     print(f"新闻收集完成，共 {len(all_news)} 个平台")
@@ -440,6 +544,87 @@ def update_news_settings():
     settings["news_minute"] = int(request.json.get("news_minute", settings.get("news_minute", 0)))
     save_config_settings(settings)
     return jsonify({"success": True})
+
+def normalize_title(title):
+    import re
+    title = re.sub(r'[\s\u3000]+', '', title)
+    title = re.sub(r'[，。！？、；：""''（）【】《》\-—…·]', '', title)
+    return title.lower().strip()
+
+def compute_similarity(a, b):
+    na = normalize_title(a)
+    nb = normalize_title(b)
+    if not na or not nb:
+        return 0.0
+    if na == nb:
+        return 1.0
+    shorter = na if len(na) <= len(nb) else nb
+    longer = nb if len(na) <= len(nb) else na
+    if shorter in longer:
+        return len(shorter) / len(longer)
+    set_a = set(na)
+    set_b = set(nb)
+    intersection = set_a & set_b
+    union = set_a | set_b
+    if not union:
+        return 0.0
+    jaccard = len(intersection) / len(union)
+    common_prefix = 0
+    for ca, cb in zip(na, nb):
+        if ca == cb:
+            common_prefix += 1
+        else:
+            break
+    prefix_score = common_prefix / max(len(na), len(nb)) if max(len(na), len(nb)) > 0 else 0
+    return max(jaccard, prefix_score)
+
+def find_similar_groups(news):
+    all_items = []
+    for source_id, source_data in news.items():
+        for item in source_data.get("items", []):
+            all_items.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", "#"),
+                "hot": item.get("hot", ""),
+                "source": source_data.get("name", ""),
+                "source_id": source_id,
+                "icon": source_data.get("icon", ""),
+            })
+    groups = []
+    used = set()
+    threshold = 0.45
+    for i, item_a in enumerate(all_items):
+        if i in used:
+            continue
+        group = [item_a]
+        used.add(i)
+        for j, item_b in enumerate(all_items):
+            if j in used:
+                continue
+            sim = compute_similarity(item_a["title"], item_b["title"])
+            if sim >= threshold:
+                group.append(item_b)
+                used.add(j)
+        if len(group) >= 2:
+            sources_in_group = list(set(x["source"] for x in group))
+            groups.append({
+                "title": item_a["title"],
+                "items": group,
+                "count": len(group),
+                "sources": sources_in_group,
+                "source_count": len(sources_in_group),
+            })
+    groups.sort(key=lambda x: (-x["source_count"], -x["count"]))
+    return groups
+
+@app.route("/news/summary")
+@login_required
+def news_summary():
+    news = load_news()
+    groups = find_similar_groups(news)
+    total_items = sum(len(s.get("items", [])) for s in news.values())
+    return render_template_string(NEWS_SUMMARY_HTML, groups=groups, news=news,
+                                  total_items=total_items, nav=get_nav("news"))
 
 @app.route("/logs")
 @login_required
@@ -2202,7 +2387,10 @@ NEWS_HTML = '''<!DOCTYPE html>
     <div class="container">
         <div class="section-header">
             <div class="section-title">今日热榜</div>
-            <button class="btn btn-primary" onclick="refreshNews()">刷新数据</button>
+            <div style="display:flex;gap:10px;align-items:center;">
+                <a href="/news/summary" style="padding:8px 16px;background:rgba(0,184,148,0.2);border:1px solid rgba(0,184,148,0.5);border-radius:6px;color:#00b894;text-decoration:none;font-size:12px;">汇总分析</a>
+                <button class="btn btn-primary" onclick="refreshNews()">刷新数据</button>
+            </div>
         </div>
         <div class="tabs">
             {% for source_id, source in sources.items() %}
@@ -2243,6 +2431,133 @@ NEWS_HTML = '''<!DOCTYPE html>
             if (r.ok) { location.reload(); } else { alert('刷新失败'); }
         }
         document.querySelector('.tab').click();
+    </script>
+</body>
+</html>'''
+
+
+NEWS_SUMMARY_HTML = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>热榜汇总 - Private Hub</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { min-height: 100vh; background: #0f0f1a; font-family: 'Microsoft YaHei', sans-serif; color: #fff; }
+        nav { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+        nav .logo { font-size: 18px; font-weight: bold; color: #fff; }
+        nav .links { display: flex; gap: 4px; align-items: center; }
+        nav .links a { color: rgba(255,255,255,0.6); text-decoration: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; transition: all 0.2s; }
+        nav .links a:hover { color: #fff; background: rgba(255,255,255,0.1); }
+        nav .links a.active { color: #e94560; background: rgba(233,69,96,0.1); }
+        .container { max-width: 1200px; margin: 0 auto; padding: 30px; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .section-title { font-size: 22px; color: rgba(255,255,255,0.9); }
+        .stats-bar { display: flex; gap: 20px; margin-bottom: 25px; flex-wrap: wrap; }
+        .stat-card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 18px 24px; min-width: 160px; }
+        .stat-card .num { font-size: 28px; font-weight: bold; color: #e94560; }
+        .stat-card .label { font-size: 13px; color: rgba(255,255,255,0.5); margin-top: 4px; }
+        .group-list { display: flex; flex-direction: column; gap: 16px; }
+        .group-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 20px 24px; transition: border-color 0.2s; }
+        .group-card:hover { border-color: rgba(233,69,96,0.4); }
+        .group-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+        .group-title { font-size: 16px; font-weight: 600; color: #fff; flex: 1; }
+        .group-badge { display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-left: 16px; }
+        .badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+        .badge-hot { background: rgba(233,69,96,0.2); color: #e94560; border: 1px solid rgba(233,69,96,0.4); }
+        .badge-count { background: rgba(0,184,148,0.2); color: #00b894; border: 1px solid rgba(0,184,148,0.4); }
+        .badge-warm { background: rgba(253,203,110,0.2); color: #fdcb6e; border: 1px solid rgba(253,203,110,0.4); }
+        .source-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+        .source-tag { padding: 3px 10px; background: rgba(255,255,255,0.06); border-radius: 6px; font-size: 12px; color: rgba(255,255,255,0.6); }
+        .item-rows { display: flex; flex-direction: column; gap: 6px; }
+        .item-row { display: flex; align-items: center; padding: 8px 12px; background: rgba(255,255,255,0.03); border-radius: 8px; transition: background 0.2s; }
+        .item-row:hover { background: rgba(255,255,255,0.07); }
+        .item-source { font-size: 13px; color: rgba(255,255,255,0.4); width: 70px; flex-shrink: 0; }
+        .item-title { flex: 1; font-size: 13px; }
+        .item-title a { color: rgba(255,255,255,0.8); text-decoration: none; }
+        .item-title a:hover { color: #e94560; }
+        .item-hot { font-size: 12px; color: #e94560; margin-left: 10px; flex-shrink: 0; }
+        .empty { text-align: center; padding: 60px; color: rgba(255,255,255,0.3); }
+        .empty p { margin-top: 10px; font-size: 14px; }
+        .back-link { color: #e94560; text-decoration: none; font-size: 14px; }
+        .back-link:hover { text-decoration: underline; }
+        .threshold-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .threshold-bar label { font-size: 13px; color: rgba(255,255,255,0.5); }
+        .threshold-bar input[type=range] { flex: 1; max-width: 200px; accent-color: #e94560; }
+        .threshold-bar .val { font-size: 13px; color: #e94560; min-width: 30px; }
+    </style>
+</head>
+<body>
+    {{ nav|safe }}
+    <div class="container">
+        <div class="section-header">
+            <div>
+                <div class="section-title">热榜汇总</div>
+                <div style="margin-top:6px;"><a href="/news" class="back-link">&larr; 返回信息管理</a></div>
+            </div>
+            <button class="btn btn-primary" onclick="refreshAndGo()" style="padding:8px 16px;background:#e94560;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;">刷新数据</button>
+        </div>
+
+        <div class="stats-bar">
+            <div class="stat-card"><div class="num">{{ groups|length }}</div><div class="label">跨平台话题</div></div>
+            <div class="stat-card"><div class="num">{{ total_items }}</div><div class="label">总信息条数</div></div>
+            <div class="stat-card"><div class="num">{{ news|length }}</div><div class="label">数据源数</div></div>
+        </div>
+
+        <div class="threshold-bar">
+            <label>相似度阈值:</label>
+            <input type="range" id="threshold" min="20" max="80" value="45" oninput="updateThreshold(this.value)">
+            <span class="val" id="thresholdVal">45%</span>
+        </div>
+
+        <div class="group-list" id="groupList">
+            {% for group in groups %}
+            <div class="group-card" data-sources="{{ group.source_count }}" data-count="{{ group.count }}">
+                <div class="group-header">
+                    <div class="group-title">{{ group.title }}</div>
+                    <div class="group-badge">
+                        <span class="badge badge-count">{{ group.count }} 条相似</span>
+                        <span class="badge badge-hot">{{ group.source_count }} 个平台</span>
+                        {% if group.source_count >= 4 %}
+                        <span class="badge badge-warm">热门话题</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="source-tags">
+                    {% for s in group.sources %}
+                    <span class="source-tag">{{ s }}</span>
+                    {% endfor %}
+                </div>
+                <div class="item-rows">
+                    {% for item in group.items %}
+                    <div class="item-row">
+                        <div class="item-source">{{ item.icon }} {{ item.source }}</div>
+                        <div class="item-title"><a href="{{ item.url }}" target="_blank">{{ item.title }}</a></div>
+                        {% if item.hot %}<div class="item-hot">{{ item.hot }}</div>{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+
+            {% if not groups %}
+            <div class="empty">
+                <div style="font-size:48px;margin-bottom:10px;">&#128269;</div>
+                <div>暂无跨平台重复话题</div>
+                <p>各平台热榜信息差异较大，未发现高度相似的话题</p>
+                <p style="margin-top:10px;">尝试调低相似度阈值，或等待更多数据收集</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <script>
+        function refreshAndGo() {
+            fetch('/api/news/refresh', {method:'POST'}).then(function(r){ location.reload(); });
+        }
+        function updateThreshold(val) {
+            document.getElementById('thresholdVal').textContent = val + '%';
+        }
     </script>
 </body>
 </html>'''
