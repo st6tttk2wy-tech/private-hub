@@ -57,14 +57,14 @@ CONFIG_SETTINGS_FILE = CONFIG_DIR / "settings.json"
 
 
 NEWS_SOURCES = {
-    "weibo": {"name": "微博", "icon": "🔥", "api": "https://api.vvhan.com/api/hotlist/weibo"},
-    "douyin": {"name": "抖音", "icon": "🎵", "api": "https://api.vvhan.com/api/hotlist/douyin"},
-    "toutiao": {"name": "今日头条", "icon": "📰", "api": "https://api.vvhan.com/api/hotlist/toutiao"},
-    "zhihu": {"name": "知乎", "icon": "💡", "api": "https://api.vvhan.com/api/hotlist/zhihuHot"},
-    "bilibili": {"name": "B站", "icon": "📺", "api": "https://api.vvhan.com/api/hotlist/bili"},
-    "baidu": {"name": "百度", "icon": "🔍", "api": "https://api.vvhan.com/api/hotlist/baiduRD"},
-    "xiaohongshu": {"name": "小红书", "icon": "📕", "api": "https://api.vvhan.com/api/hotlist/xhsHot"},
-    "qq-news": {"name": "今日资讯", "icon": "📢", "api": "https://api.vvhan.com/api/hotlist/qq-news"},
+    "weibo": {"name": "微博", "icon": "🔥", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=KqndgxeLl9"},
+    "douyin": {"name": "抖音", "icon": "🎵", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=Jb0vmloB1G"},
+    "toutiao": {"name": "今日头条", "icon": "📰", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=3JLVqRhQPO"},
+    "zhihu": {"name": "知乎", "icon": "💡", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=mproPpoq6O"},
+    "bilibili": {"name": "B站", "icon": "📺", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=0R9ABmpbMG"},
+    "baidu": {"name": "百度", "icon": "🔍", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=wwK7FNBZ9D"},
+    "xiaohongshu": {"name": "小红书", "icon": "📕", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=TyVJ7QMbOK"},
+    "qq-news": {"name": "今日资讯", "icon": "📢", "api": "https://api.codelife.cc/api/top/list?lang=cn&id=TKYDG2E6gG"},
 }
 
 WATERMARK_CSS = '''
@@ -149,22 +149,35 @@ def fetch_news():
     all_news = {}
     for source_id, source in NEWS_SOURCES.items():
         try:
-            resp = requests.get(source["api"], timeout=10)
+            resp = requests.get(source["api"], timeout=10, headers={"User-Agent": "Mozilla/5.0"})
             if resp.status_code == 200:
                 data = resp.json()
+                raw_items = []
                 if data.get("success"):
-                    items = data.get("data", [])[:20]
+                    raw_items = data.get("data", [])
+                elif data.get("code") == 200:
+                    raw_items = data.get("data", [])
+                if raw_items:
+                    items = []
+                    for item in raw_items[:20]:
+                        items.append({
+                            "title": item.get("title", ""),
+                            "url": item.get("link", item.get("url", "#")),
+                            "hot": item.get("hotValue", item.get("hot", "")),
+                            "desc": item.get("desc", "")
+                        })
                     all_news[source_id] = {
                         "name": source["name"],
                         "icon": source["icon"],
                         "items": items,
                         "updated": datetime.now().strftime("%Y-%m-%d %H:%M")
                     }
+                    print(f"  [{source['name']}] 获取 {len(items)} 条")
         except Exception as e:
             print(f"  [{source['name']}] 失败: {e}")
     if all_news:
         save_news(all_news)
-    print("新闻收集完成")
+    print(f"新闻收集完成，共 {len(all_news)} 个平台")
 
 def news_scheduler():
     while True:
