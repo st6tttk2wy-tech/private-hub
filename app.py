@@ -2214,7 +2214,7 @@ NEWS_HTML = '''<!DOCTYPE html>
             {% if source_id in news %}
             <div class="update-time">更新时间: {{ news[source_id].updated }}</div>
             <div class="news-list">
-                {% for item in news[source_id].items %}
+                {% for item in news[source_id]['items'] %}
                 <div class="news-item">
                     <div class="news-header">
                         <div class="news-rank {{ 'top3' if loop.index <= 3 else 'normal' }}">{{ loop.index }}</div>
