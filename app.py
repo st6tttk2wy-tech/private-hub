@@ -2530,7 +2530,7 @@ NEWS_SUMMARY_HTML = '''<!DOCTYPE html>
                     {% endfor %}
                 </div>
                 <div class="item-rows">
-                    {% for item in group.items %}
+                    {% for item in group['items'] %}
                     <div class="item-row">
                         <div class="item-source">{{ item.icon }} {{ item.source }}</div>
                         <div class="item-title"><a href="{{ item.url }}" target="_blank">{{ item.title }}</a></div>
