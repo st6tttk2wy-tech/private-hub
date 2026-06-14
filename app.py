@@ -107,47 +107,96 @@ def scrape_bilibili():
     return items
 
 def scrape_baidu():
+    import re
     items = []
     try:
         resp = requests.get("https://top.baidu.com/board?tab=realtime",
-                            headers=SCRAPER_HEADERS, timeout=10)
-        import re
-        titles = re.findall(r'class="title_.*?".*?>(.*?)<', resp.text)
-        for i, title in enumerate(titles[:20]):
-            title = title.strip()
-            if title:
-                items.append({"title": title, "url": "https://www.baidu.com/s?wd=" + title, "hot": "", "desc": ""})
+                            headers=SCRAPER_HEADERS, timeout=10, verify=False)
+        match = re.search(r'<!--s-data:(.*?)-->', resp.text)
+        if match:
+            data = json.loads(match.group(1))
+            for card in data.get("data", {}).get("cards", []):
+                for item in card.get("content", [])[:20]:
+                    word = item.get("word", "")
+                    desc = item.get("desc", "")
+                    hot = item.get("hotScore", "")
+                    url = item.get("url", "")
+                    if word:
+                        items.append({"title": word, "url": url or "https://www.baidu.com/s?wd=" + word, "hot": str(hot), "desc": desc[:80]})
+        else:
+            titles = re.findall(r'class="title_.*?".*?>(.*?)<', resp.text)
+            for title in titles[:20]:
+                title = title.strip()
+                if title:
+                    items.append({"title": title, "url": "https://www.baidu.com/s?wd=" + title, "hot": "", "desc": ""})
     except Exception as e:
         print(f"  [百度爬虫] 失败: {e}")
     return items
 
 def scrape_xiaohongshu():
+    import re
     items = []
     try:
-        resp = requests.get("https://edith.xiaohongshu.com/api/sns/v1/search/hot_list",
-                            headers=SCRAPER_HEADERS, timeout=10)
-        data = resp.json()
-        for item in data.get("data", [])[:20]:
-            title = item.get("title", "")
-            if title:
-                items.append({"title": title, "url": "https://www.xiaohongshu.com/search_result?keyword=" + title, "hot": "", "desc": ""})
+        resp = requests.get("https://www.xiaohongshu.com/explore",
+                            headers=SCRAPER_HEADERS, timeout=10, verify=False)
+        match = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?})\s*</script>', resp.text, re.DOTALL)
+        if match:
+            raw = match.group(1).replace('undefined', 'null')
+            data = json.loads(raw)
+            def extract(obj, depth=0):
+                if depth > 6: return
+                if isinstance(obj, dict):
+                    if 'noteId' in obj or 'noteCard' in obj:
+                        card = obj.get('noteCard', obj)
+                        title = card.get('displayTitle', '') or card.get('title', '') or card.get('noteCard', {}).get('displayTitle', '')
+                        nid = obj.get('noteId', '')
+                        if title:
+                            items.append({"title": title, "url": "https://www.xiaohongshu.com/explore/" + nid, "hot": "", "desc": ""})
+                    for v in obj.values():
+                        extract(v, depth+1)
+                elif isinstance(obj, list):
+                    for v in obj:
+                        extract(v, depth+1)
+            extract(data)
     except Exception as e:
         print(f"  [小红书爬虫] 失败: {e}")
-    return items
+    seen = set()
+    unique = []
+    for it in items:
+        if it["title"] not in seen:
+            seen.add(it["title"])
+            unique.append(it)
+    return unique[:20]
 
 def scrape_qq_news():
     items = []
     try:
-        resp = requests.get("https://i.news.qq.com/trpc.qqnews_web.kv_srv.kv_srv_http/list?sub_srv_id=24hours&srv_id=pc&offset=0&limit=20&strategy=1&ext=%7B%22pool%22%3A%5B%22top%22%5D%2C%22LastRecordTime%22%3A0%7D",
-                            headers=SCRAPER_HEADERS, timeout=10)
-        data = resp.json()
-        for item in data.get("data", {}).get("list", [])[:20]:
-            title = item.get("title", "")
-            url = item.get("url", "")
-            if title:
-                items.append({"title": title, "url": url, "hot": "", "desc": ""})
+        resp = requests.get("https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2509&k=&num=20&page=1",
+                            headers=SCRAPER_HEADERS, timeout=10, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            for item in data.get("result", {}).get("data", [])[:20]:
+                title = item.get("title", "")
+                url = item.get("url", "")
+                intro = item.get("intro", "")[:80]
+                if title:
+                    items.append({"title": title, "url": url, "hot": "", "desc": intro})
     except Exception as e:
         print(f"  [今日资讯爬虫] 失败: {e}")
+    if not items:
+        try:
+            resp = requests.get("https://m.163.com/fe/api/hot/news/flow?api_version=v1&size=20",
+                                headers=SCRAPER_HEADERS, timeout=10, verify=False)
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in data.get("data", {}).get("list", [])[:20]:
+                    title = item.get("title", "")
+                    url = item.get("url", "")
+                    source = item.get("source", "")
+                    if title:
+                        items.append({"title": title, "url": url, "hot": "", "desc": source})
+        except Exception as e2:
+            print(f"  [今日资讯备选] 失败: {e2}")
     return items
 
 SCRAPERS = {
